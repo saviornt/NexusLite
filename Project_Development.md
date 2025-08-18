@@ -15,30 +15,35 @@ Future features will always build on stable, well-tested foundations.
 
 - [ ] Implement error handling and logging.
 - [x] Implement `Document` module (`document.rs`)
-  - Create, update, delete BSON-like documents (UUID-based).
+  - Create, find, update, delete BSON-like documents.
+  - When creating a new document, the document will be assigned a document UUID.
+  - Documents will also store metadata that describes the document details.
 - [x] Implement `Collection` module (`collection.rs`)
   - Manage sets of documents inside named collections.
+  - Collections will maintain an index of document UUIDs.
+  - Collections will also store vector index of each document.
 - [x] Implement `Database` module (`engine.rs`)
   - Manage multiple collections.
   - Create, save, delete database files.
 - [ ] Implement Rust calls to database engine (`lib.rs`)
 - [x] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
-- [ ] Developer Documentation (Project_Development.md).
+- [x] Developer Documentation (Project_Development.md).
 - [ ] Generate Rust documentation (RustDoc) using `cargo doc`.
+- [ ] Perform tests and then troubleshoot and fix any issues.
 
-### Sprint 2 - Persistence
-
-- [ ] Implement **WAL (Write Ahead Log)** to persist operations using a write-through approach.
-- [ ] Implement collection snapshots.
-- [ ] Store collections in **segmented files per collection** using a **heap file + index** approach.
-- [ ] Add stress/failure tests to the testing framework to test power loss simulations, cache eviction correctness, etc.
-
-### Sprint 3 - Cache Layer (Redis-inspired)
+### Sprint 2 - Cache Layer (Redis-inspired)
 
 - [ ] Implement a **Hybrid TTL & LRU eviction policy** for memory efficiency.
 - [ ] Add in-memory **Hybrid eviction policy** for cache.
 - [ ] Implement the **cache using the hybrid evicition policy** for documents.
 - [ ] Cache → WAL → storage persistence pipeline.
+
+### Sprint 3 - Persistence
+
+- [ ] Implement **WAL (Write Ahead Log)** to persist operations using a write-through approach.
+- [ ] Implement collection snapshots.
+- [ ] Store collections in **segmented files per collection** using a **heap file + index** approach.
+- [ ] Add stress/failure tests to the testing framework to test power loss simulations, cache eviction correctness, etc.
 
 ### Sprint 4 - Import & Export Features
 
@@ -78,11 +83,57 @@ flowchart TD
 
 ---
 
+## Project Structure
+
+The following is the current project structure, subject to change:
+
+```text
+nexus_lite
+├── src\
+│   ├── api.rs
+│   ├── cache.rs
+│   ├── cli.rs
+│   ├── collection.rs
+│   ├── crypto.rs
+│   ├── document.rs
+│   ├── engine.rs
+│   ├── errors.rs
+│   ├── export.rs
+│   ├── import.rs
+│   ├── lib.rs
+│   ├── logger.rs
+│   ├── types.rs
+│   └── wal.rs
+├── test_framework\
+│   ├── common\
+│   │   └── test_logger.rs
+│   ├── integration.rs
+│   ├── mod_api.rs
+│   ├── mod_cli.rs
+│   ├── mod_collection.rs
+│   ├── mod_crypto.rs
+│   ├── mod_document.rs
+│   ├── mod_engine.rs
+│   ├── mod_errors.rs
+│   ├── mod_export.rs
+│   ├── mod_import.rs
+│   ├── mod_lib.rs
+│   ├── mod_logger.rs
+│   ├── mod_types.rs
+│   └── mod_wal.rs
+├── .gitignore
+├── Cargo.lock
+├── Cargo.toml
+└── Project_Development.md
+```
+
+---
+
 ## Modules
 
 ### Document Module: document.rs
 
-- Purpose: Represents JSON-like records.
+- Purpose: Represents BSON-like records.
 - Features:
   - Document::new() --> create with UUID.
   - Document::update() --> update existing document.
@@ -91,7 +142,7 @@ flowchart TD
 
 - Purpose: Group of documents.
 - Features:
-  - Collection::new() --> Create with name.
+  - Collection::new() --> Create a new collection with name and uuid.
   - Collection::insert_document() --> Insert a document.
   - Collection::find_document() --> Find a document by ID.
   - Collection::update_document() --> Update a document.
