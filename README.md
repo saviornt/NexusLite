@@ -4,6 +4,10 @@ Nexus-Lite is an embedded **NoSQL database engine**, inspired by the best featur
 
 ---
 
+[NotebookLM Overview](https://notebooklm.google.com/notebook/8a362fc5-f2af-4c76-8e21-f087eddd31d4?artifactId=61555702-67e0-495c-af64-3520605a0660)
+
+---
+
 ## AGILE Project Roadmap
 
 We’ll follow an **iterative AGILE approach** where each sprint adds working, testable functionality.  
