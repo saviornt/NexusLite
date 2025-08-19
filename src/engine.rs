@@ -3,6 +3,7 @@ use crate::collection::Collection;
 use crate::errors::DbError;
 use crate::types::{CollectionName, Document, DocumentId};
 use crate::wal::{read_record, write_record, OpKind, WalRecord};
+use bincode::error::IntegerType;
 use parking_lot::{Mutex, RwLock};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -90,6 +91,7 @@ impl Engine {
         let engine = Self {
             options: options.clone(),
             collections: RwLock::new(HashMap::new()),
+            
             cache: Mutex::new(HotCache::new(options.cache_capacity.try_into().unwrap_or(1024))),
             wal_writer: Mutex::new(wal_writer),
             wal_path,

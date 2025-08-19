@@ -9,9 +9,12 @@ Nexus-Lite is an embedded **NoSQL database engine**, inspired by the best featur
 We’ll follow an **iterative AGILE approach** where each sprint adds working, testable functionality.  
 Future features will always build on stable, well-tested foundations.
 
-### Sprint 1 - Core In-Memory Engine
+**Notes:**
 
-**Note:** Design with concurrency in mind using `RwLock` from the start as well as handling and logging errors.
+- Design with concurrency in mind using `RwLock` from the start as well as handling and logging errors.
+- Design with async in mind using `tokio` for both network and file-based async I/O.
+
+### Sprint 1 - Core In-Memory Engine
 
 - [ ] Implement error handling and logging.
 - [x] Implement `Document` module (`document.rs`)
@@ -37,6 +40,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Add in-memory **Hybrid eviction policy** for cache.
 - [ ] Implement the **cache using the hybrid evicition policy** for documents.
 - [ ] Cache → WAL → storage persistence pipeline.
+- [ ] Perform tests and then troubleshoot and fix any issues.
 
 ### Sprint 3 - Persistence
 
@@ -51,6 +55,7 @@ Future features will always build on stable, well-tested foundations.
   - The importer should infer what data format is being imported.
   - Once inferred, it should import the data into the database properly formatted.
 - [ ] Implement export features to export to various data formats.
+- [ ] Perform tests and then troubleshoot and fix any issues.
 
 ### Sprint 5 - Querying & APIs
 
@@ -58,6 +63,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Update operators (`$set`, `$inc`, `$unset`).
 - [ ] Create REST/gRPC API for external usage.
 - [ ] Developer-friendly Rust API bindings.
+- [ ] Perform tests and then troubleshoot and fix any issues.
 
 ### Sprint 6 - Optimization, Extensions, Additional Features
 
@@ -66,6 +72,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Deployment tooling (CLI & embedded support).
 - [ ] Implement Key/Pair based encryption and decryption using ECC-256 bit encryption.
 - [ ] Implement signature verification using ECDSA.
+- [ ] Perform tests and then troubleshoot and fix any issues.
 
 ---
 
@@ -220,3 +227,4 @@ fn main() {
   - Provide Cargo feature flags to toggle encryption support.
   - Encrypt snapshots, WAL, and per-collection files.
   - Sign persisted data to ensure integrity.
+- Add Vector Map Indexing for searching through collections and documents
