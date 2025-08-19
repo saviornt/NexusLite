@@ -16,23 +16,24 @@ Future features will always build on stable, well-tested foundations.
 
 ### Sprint 1 - Core In-Memory Engine
 
+- [ ] Developer Documentation (Project_Development.md).
 - [ ] Implement error handling and logging.
-- [x] Implement `Document` module (`document.rs`)
+- [ ] Implement `Document` module (`document.rs`)
   - Create, find, update, delete BSON-like documents.
   - When creating a new document, the document will be assigned a document UUID.
   - Documents will also store metadata that describes the document details.
-- [x] Implement `Collection` module (`collection.rs`)
+- [ ] Implement `Collection` module (`collection.rs`)
   - Manage sets of documents inside named collections.
   - Collections will maintain an index of document UUIDs.
   - Collections will also store vector index of each document.
-- [x] Implement `Database` module (`engine.rs`)
+- [ ] Implement `Database` module (`engine.rs`)
   - Manage multiple collections.
   - Create, save, delete database files.
 - [ ] Implement Rust calls to database engine (`lib.rs`)
-- [x] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
-- [x] Developer Documentation (Project_Development.md).
+- [ ] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
 - [ ] Generate Rust documentation (RustDoc) using `cargo doc`.
 - [ ] Perform tests and then troubleshoot and fix any issues.
+- [ ] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 2 - Cache Layer (Redis-inspired)
 
@@ -41,6 +42,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Implement the **cache using the hybrid evicition policy** for documents.
 - [ ] Cache → WAL → storage persistence pipeline.
 - [ ] Perform tests and then troubleshoot and fix any issues.
+- [ ] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 3 - Persistence
 
@@ -48,6 +50,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Implement collection snapshots.
 - [ ] Store collections in **segmented files per collection** using a **heap file + index** approach.
 - [ ] Add stress/failure tests to the testing framework to test power loss simulations, cache eviction correctness, etc.
+- [ ] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 4 - Import & Export Features
 
@@ -56,6 +59,7 @@ Future features will always build on stable, well-tested foundations.
   - Once inferred, it should import the data into the database properly formatted.
 - [ ] Implement export features to export to various data formats.
 - [ ] Perform tests and then troubleshoot and fix any issues.
+- [ ] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 5 - Querying & APIs
 
@@ -64,6 +68,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Create REST/gRPC API for external usage.
 - [ ] Developer-friendly Rust API bindings.
 - [ ] Perform tests and then troubleshoot and fix any issues.
+- [ ] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 6 - Optimization, Extensions, Additional Features
 
@@ -73,6 +78,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Implement Key/Pair based encryption and decryption using ECC-256 bit encryption.
 - [ ] Implement signature verification using ECDSA.
 - [ ] Perform tests and then troubleshoot and fix any issues.
+- [ ] Update Developer Documentation (Project_Development.md).
 
 ---
 
