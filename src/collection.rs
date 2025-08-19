@@ -1,49 +1,57 @@
 use std::collections::HashMap;
-use crate::document::{Document, DocumentId};
+use std::sync::RwLock;
+use uuid::Uuid;
+use crate::document::Document;
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct Collection {
     pub name: String,
-    pub documents: HashMap<DocumentId, Document>,
+    pub documents: RwLock<HashMap<Uuid, Document>>,
+}
+
+impl Clone for Collection {
+    fn clone(&self) -> Self {
+        Collection {
+            name: self.name.clone(),
+            documents: RwLock::new(self.documents.read().unwrap().clone()),
+        }
+    }
 }
 
 impl Collection {
-    pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            documents: HashMap::new(),
+    pub fn new(name: String) -> Self {
+        Collection {
+            name,
+            documents: RwLock::new(HashMap::new()),
         }
     }
 
-    /// Insert a document into this collection
-    pub fn insert_document(&mut self, doc: Document) -> DocumentId {
-        let id = doc.id;
-        self.documents.insert(id, doc);
-        id
+    pub fn insert_document(&self, document: Document) -> Uuid {
+        let doc_id = document.id;
+        self.documents.write().unwrap().insert(doc_id, document);
+        doc_id
     }
 
-    /// Find a document by ID
-    pub fn find_document(&self, id: &DocumentId) -> Option<&Document> {
-        self.documents.get(id)
+    pub fn find_document(&self, id: &Uuid) -> Option<Document> {
+        self.documents.read().unwrap().get(id).cloned()
     }
 
-    /// Update a document (replace existing data)
-    pub fn update_document(&mut self, id: &DocumentId, new_doc: Document) -> Option<()> {
-        if self.documents.contains_key(id) {
-            self.documents.insert(*id, new_doc);
-            Some(())
+    pub fn update_document(&self, id: &Uuid, new_document: Document) -> bool {
+        let mut documents = self.documents.write().unwrap();
+        if documents.contains_key(id) {
+            documents.insert(*id, new_document);
+            true
         } else {
-            None
+            false
         }
     }
 
-    /// Delete a document by ID
-    pub fn delete_document(&mut self, id: &DocumentId) -> Option<Document> {
-        self.documents.remove(id)
+    pub fn delete_document(&self, id: &Uuid) -> bool {
+        self.documents.write().unwrap().remove(id).is_some()
     }
 
-    /// List all document IDs
-    pub fn list_document_ids(&self) -> Vec<DocumentId> {
-        self.documents.keys().cloned().collect()
+    pub fn list_document_ids(&self) -> Vec<Uuid> {
+        self.documents.read().unwrap().keys().cloned().collect()
     }
 }

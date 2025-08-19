@@ -1,3 +1,4 @@
+.gitignore
 /target
 ProjectStructure.md
 generate_project_structure.py

@@ -1,0 +1,14 @@
+# A simple configuration that writes logs to a file.
+refresh_rate: 30 seconds
+appenders:
+  # The "requests" appender writes to a file.
+  requests:
+    kind: file
+    path: "log/requests.log"
+    encoder:
+      pattern: "{d} - {m}{n}"
+
+root:
+  level: info
+  appenders:
+    - requests

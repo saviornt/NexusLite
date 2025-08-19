@@ -1,85 +1,87 @@
-/// This module is responsibe for the creation, finding, updating and deleting BSON documents
-/// and document metadata.
-
-use chrono::{DateTime, TimeZone};
-use serde::{Serialize, Deserialize};
-use serde_json::Value;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use bson::{Document as BsonDocument, Bson};
+use std::time::Duration;
 use uuid::Uuid;
 
-pub type DocumentId = Uuid;
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum DocumentType {
+    Persistent,
+    Ephemeral,
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Metadata {
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub document_type: DocumentType,
+    pub ttl: Option<Duration>,
+}
+
+impl Metadata {
+    pub fn new(document_type: DocumentType) -> Self {
+        Self {
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            document_type,
+            ttl: None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Document {
-    pub id: DocumentId,
-    pub data: Value,
-    pub metadata: Value,
-}
-
-pub struct MetaData {
-    // pub created_at:
-    // pub created_by:
-    // pub modified_at:
-    // pub modified_by:
-    // pub last_accessed_at:
-    // pub last_accessed_by:
-    // pub document_size:
-}
-
-impl MetaData {
-    /// Create metadata for document
-    pub fn created_at() -> Self {
-        // Get current datetime
-    }
-    
-    pub fn created_by() -> Self {
-        // Get current user name
-    }
-
-    pub fn modified_at() -> Self {
-        // Get current datetime
-    }
-
-    pub fn modified_by() -> Self {
-        // Get current user name
-    }
-
-    pub fn last_accessed_at() -> Self {
-        // Get current datetime
-    }
-
-    pub fn last_accessed_by() -> Self {
-        // Get current user name
-    }
-
-    pub fn document_size() -> Self {
-        // Calculate estimated document size in MB
-    }
-
+    pub id: Uuid,
+    pub data: BsonDocument,
+    pub metadata: Metadata,
 }
 
 impl Document {
-    // Create a new document with generated UUID
-    pub fn create(data: Value, metadata: Value) -> Self {
+    pub fn new(data: BsonDocument, document_type: DocumentType) -> Self {
         Self {
             id: Uuid::new_v4(),
             data,
-            metadata: MetaData
+            metadata: Metadata::new(document_type),
         }
     }
 
-    // Find a document based on document UUID
-    pub fn find(document_id: Value) -> Self {
-        
+    pub fn set_ttl(&mut self, ttl: Duration) {
+        if self.metadata.document_type == DocumentType::Ephemeral {
+            self.metadata.ttl = Some(ttl);
+        }
     }
 
-    // Update the document data
-    pub fn update(&mut self, new_data: Value, update_metadata: Value) {
+    pub fn get_ttl(&self) -> Option<Duration> {
+        self.metadata.ttl
+    }
+
+    pub fn is_expired(&self) -> bool {
+        if let Some(ttl) = self.metadata.ttl {
+            let elapsed = Utc::now().signed_duration_since(self.metadata.updated_at);
+            elapsed > chrono::Duration::from_std(ttl).unwrap()
+        } else {
+            false
+        }
+    }
+
+    pub fn update(&mut self, new_data: BsonDocument) {
         self.data = new_data;
-        self.metadata = update_metadata;
+        self.metadata.updated_at = Utc::now();
     }
 
-    // Delete the document
-    pub fn delete() {
+    pub fn find(&self, path: &str) -> Option<&Bson> {
+        let parts: Vec<&str> = path.split('.').collect();
+        let mut current_doc = &self.data;
 
+        for (i, part) in parts.iter().enumerate() {
+            if i == parts.len() - 1 {
+                // Last part, try to get the Bson value
+                return current_doc.get(*part);
+            } else {
+                // Not the last part, try to get a nested document
+                current_doc = current_doc.get_document(*part).ok()?;
+            }
+        }
+        None // Should not be reached for valid paths
     }
 }

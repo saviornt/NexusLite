@@ -11,36 +11,42 @@ Future features will always build on stable, well-tested foundations.
 
 **Notes:**
 
-- Design with concurrency in mind using `RwLock` from the start as well as handling and logging errors.
+- Design with concurrency in mind using `RwLock` from the start.
 - Design with async in mind using `tokio` for both network and file-based async I/O.
+- Design modules with error handling and logging using the `thiserror`, `log`, and `log4rs` crates.
 
 ### Sprint 1 - Core In-Memory Engine
 
-- [ ] Developer Documentation (Project_Development.md).
-- [ ] Implement error handling and logging.
-- [ ] Implement `Document` module (`document.rs`)
+- [x] Developer Documentation (Project_Development.md).
+- [x] Implement error handling and logging using the crates `log` and `log4rs`.
+- [x] Implement `Document` module (`document.rs`)
   - Create, find, update, delete BSON-like documents.
   - When creating a new document, the document will be assigned a document UUID.
   - Documents will also store metadata that describes the document details.
-- [ ] Implement `Collection` module (`collection.rs`)
+  - There should be two types of documents: persistent and temporary.
+  - Temporary document metadata will support an optional Time-To-Live (TTL) and are stored in a hidden collection and loaded into memory on startup.
+- [x] Implement `Collection` module (`collection.rs`)
   - Manage sets of documents inside named collections.
   - Collections will maintain an index of document UUIDs.
   - Collections will also store vector index of each document.
-- [ ] Implement `Database` module (`engine.rs`)
+  - A "hidden" collection also needs to be created called `_tempDocuments` that will contain ephemeral documents.
+- [x] Implement `Engine` module (`engine.rs`)
   - Manage multiple collections.
   - Create, save, delete database files.
-- [ ] Implement Rust calls to database engine (`lib.rs`)
-- [ ] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
-- [ ] Generate Rust documentation (RustDoc) using `cargo doc`.
-- [ ] Perform tests and then troubleshoot and fix any issues.
-- [ ] Update Developer Documentation (Project_Development.md).
+- [x] Implement Rust API calls to database engine (`lib.rs`)
+- [x] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
+- [x] Generate Rust documentation (RustDoc) using `cargo doc`.
+- [x] Perform tests and then troubleshoot and fix any issues.
+  - Due to how logging works, we do not use a `mod_logging.rs` file since we cannot have 2 loggers be initialized at the same time.
+- [x] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 2 - Cache Layer (Redis-inspired)
 
-- [ ] Implement a **Hybrid TTL & LRU eviction policy** for memory efficiency.
-- [ ] Add in-memory **Hybrid eviction policy** for cache.
-- [ ] Implement the **cache using the hybrid evicition policy** for documents.
+- [ ] Implement a **Hybrid TTL & LRU eviction policy**. TTL has highest priority.
+- [ ] Implement the **cache using the hybrid eviction policy** for documents.
+  - Use a **lazy eviction + periodic low-priority background purging** strategy.
 - [ ] Cache → WAL → storage persistence pipeline.
+- [ ] Implement logic to load all documents from the internal `_tempDocuments` collection into the cache on database startup.
 - [ ] Perform tests and then troubleshoot and fix any issues.
 - [ ] Update Developer Documentation (Project_Development.md).
 
@@ -48,8 +54,8 @@ Future features will always build on stable, well-tested foundations.
 
 - [ ] Implement **WAL (Write Ahead Log)** to persist operations using a write-through approach.
 - [ ] Implement collection snapshots.
-- [ ] Store collections in **segmented files per collection** using a **heap file + index** approach.
-- [ ] Add stress/failure tests to the testing framework to test power loss simulations, cache eviction correctness, etc.
+- [ ] Store the database in a **single file** (like SQLite) with a separate file for the WAL.
+- [ ] Implement a periodic, configurable **checkpointing process** to merge the WAL into the main database file.
 - [ ] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 4 - Import & Export Features
@@ -67,6 +73,7 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Update operators (`$set`, `$inc`, `$unset`).
 - [ ] Create REST/gRPC API for external usage.
 - [ ] Developer-friendly Rust API bindings.
+- [ ] Deployment tooling (CLI & embedded support).
 - [ ] Perform tests and then troubleshoot and fix any issues.
 - [ ] Update Developer Documentation (Project_Development.md).
 
@@ -74,11 +81,26 @@ Future features will always build on stable, well-tested foundations.
 
 - [ ] Indexing strategies.
 - [ ] Transaction support.
-- [ ] Deployment tooling (CLI & embedded support).
 - [ ] Implement Key/Pair based encryption and decryption using ECC-256 bit encryption.
 - [ ] Implement signature verification using ECDSA.
 - [ ] Perform tests and then troubleshoot and fix any issues.
 - [ ] Update Developer Documentation (Project_Development.md).
+
+---
+
+## Future Enhancements and Optional Features
+
+- Add support for PQC encryption/decryption and signature verification of the database.
+  - Use `pqcrypto-mlkem` for key encapsulation (`ml-kem-512`, `ml-kem-768`, `ml-kem-1024`).
+  - Use `pqcrypto-sphincsplus` for signature verification (`128`, `192`, `256`-bit hash functions).
+  - Provide Cargo feature flags to toggle encryption support.
+  - Encrypt snapshots, WAL, and per-collection files.
+  - Sign persisted data to ensure integrity.
+- Add support for full, multi-document ACID transactions.
+- Add Vector Map Indexing for searching through collections and documents.
+  - Use the `hnsw` crate for efficient approximate nearest neighbor search.
+  - Implement indexing on document fields for faster queries.
+  - Support for multi-dimensional vectors and various distance metrics.
 
 ---
 
@@ -90,7 +112,7 @@ flowchart TD
     B[Imported Data <br> <i>import.rs</i>] --> C
     C --> D[WAL <br> <i>wal.rs</i>]
     D --> E[Document <br> <i>document.rs</i>] --> H[Exported Data <br> <i>export.rs</i>]
-    E --> F[Collection <br> <i>collection.rs</i>] --> H
+    E --> F{Collection <br> <i>collection.rs</i>} --> H
     F --> G[Database <br> <i>engine.rs</i>] --> H
 ```
 
@@ -117,7 +139,7 @@ nexus_lite
 │   ├── logger.rs
 │   ├── types.rs
 │   └── wal.rs
-├── test_framework\
+├── tests\
 │   ├── common\
 │   │   └── test_logger.rs
 │   ├── integration.rs
@@ -187,7 +209,7 @@ nexus_lite
 
 ### CLI Module: cli.rs
 
-- Purpose: Provides CLI support for developers.
+- Purpose: Provides CLI support for developers and database administration.
 
 ### Database Module: lib.rs
 
@@ -222,15 +244,3 @@ fn main() {
     users.delete_document(&doc_id);
 }
 ```
-
----
-
-## Future Enhancements
-
-- Add support for PQC encryption/decryption and signature verification of the database.
-  - Use `pqcrypto-mlkem` for key encapsulation (`ml-kem-512`, `ml-kem-768`, `ml-kem-1024`).
-  - Use `pqcrypto-sphincsplus` for signature verification (`128`, `192`, `256`-bit hash functions).
-  - Provide Cargo feature flags to toggle encryption support.
-  - Encrypt snapshots, WAL, and per-collection files.
-  - Sign persisted data to ensure integrity.
-- Add Vector Map Indexing for searching through collections and documents
