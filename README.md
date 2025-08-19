@@ -4,7 +4,7 @@ Nexus-Lite is an embedded **NoSQL database engine**, inspired by the best featur
 
 ---
 
-https://youtu.be/6RnNEfNk_G4
+[Watch NotebookLM's Overview on Youtube](https://www.youtube.com/watch?v=6RnNEfNk_G4)
 
 ---
 
