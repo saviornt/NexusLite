@@ -122,6 +122,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bit-vec"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02b4ff8b16e6076c3e14220b39fbc1fabb6737522281a388998046859400895f"
+
+[[package]]
 name = "bitflags"
 version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -137,6 +143,15 @@ dependencies = [
  "radium",
  "tap",
  "wyz",
+]
+
+[[package]]
+name = "bloom"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d00ac8e5056d6d65376a3c1aa5c7c34850d6949ace17f0266953a254eb3d6fe8"
+dependencies = [
+ "bit-vec",
 ]
 
 [[package]]
@@ -209,6 +224,15 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "crc32fast"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "deranged"
@@ -540,22 +564,27 @@ name = "nexus_lite"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "bloom",
  "bson",
  "chrono",
+ "crc32fast",
  "hnsw",
  "lazy_static",
  "log",
  "log4rs",
  "lru",
  "parking_lot",
+ "rand 0.9.2",
  "serde",
  "serde_bson",
+ "serde_bytes",
  "serde_json",
  "tempfile",
  "thiserror 2.0.16",
  "time",
  "tokio",
  "uuid",
+ "winapi",
 ]
 
 [[package]]

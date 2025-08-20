@@ -11,6 +11,7 @@ pub mod import;
 pub mod logger;
 pub mod types;
 pub mod wal;
+pub mod wasp;
 
 use crate::collection::Collection;
 use crate::document::Document;
@@ -23,27 +24,42 @@ use std::sync::Arc;
 /// The main database struct.
 pub struct Database {
     engine: Arc<Engine>,
-    db_file_path: Option<String>,
 }
 
 impl Database {
     /// Creates a new in-memory database instance.
     pub fn new() -> Result<Self, DbError> {
-        let engine = Engine::new(PathBuf::from("wal.bin")).map_err(|e| DbError::Io(e.to_string()))?;
+        let engine = Engine::with_wasp(PathBuf::from("wasp.bin")).map_err(|e| DbError::Io(e.to_string()))?;
         Ok(Database {
             engine: Arc::new(engine),
-            db_file_path: None,
         })
     }
 
-    /// Opens or creates a database file.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, DbError> {
-        let wal_path = path.as_ref().with_extension("wal");
-        let engine = Engine::new(wal_path).map_err(|e| DbError::Io(e.to_string()))?;
+    /// Opens or creates a database file and its associated WASP file.
+    ///
+    /// The main database is stored at `{filepath}` and the WASP engine state is stored at `{filepath}.wasp`.
+    pub fn open<P: AsRef<Path>>(filepath: P) -> Result<Self, DbError> {
+        let db_path = filepath.as_ref();
+        let wasp_path = db_path.with_extension("wasp");
+
+        // Create the main database file if it doesn't exist
+        if !db_path.exists() {
+            std::fs::File::create(db_path)
+                .map_err(|e| DbError::Io(format!("Failed to create database file: {}", e)))?;
+        }
+
+        // Create the WASP file if it doesn't exist
+        if !wasp_path.exists() {
+            std::fs::File::create(&wasp_path)
+                .map_err(|e| DbError::Io(format!("Failed to create WASP file: {}", e)))?;
+        }
+
+        // Open the WASP engine using the .wasp file
+        let engine = Engine::with_wasp(wasp_path)
+            .map_err(|e| DbError::Io(e.to_string()))?;
 
         Ok(Database {
             engine: Arc::new(engine),
-            db_file_path: Some(path.as_ref().to_string_lossy().into_owned()),
         })
     }
 

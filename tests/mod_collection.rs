@@ -1,6 +1,7 @@
 use nexus_lite::collection::Collection;
 use nexus_lite::document::{Document, DocumentType};
 use nexus_lite::wal::Wal;
+use nexus_lite::wasp::StorageEngine;
 use bson::doc;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -10,8 +11,9 @@ use tempfile::tempdir;
 async fn test_collection_new() {
     let dir = tempdir().unwrap();
     let wal_path = dir.path().join("wal.log");
-    let wal = Arc::new(RwLock::new(Wal::new(wal_path).unwrap()));
-    let collection = Collection::new("test_collection".to_string(), wal, 10);
+    let wal = Wal::new(wal_path).unwrap();
+    let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wal)));
+    let collection = Collection::new("test_collection".to_string(), storage, 10);
     assert_eq!(collection.name, "test_collection");
 }
 
@@ -19,8 +21,9 @@ async fn test_collection_new() {
 async fn test_insert_and_find_document() {
     let dir = tempdir().unwrap();
     let wal_path = dir.path().join("wal.log");
-    let wal = Arc::new(RwLock::new(Wal::new(wal_path).unwrap()));
-    let collection = Collection::new("test_collection".to_string(), wal, 10);
+    let wal = Wal::new(wal_path).unwrap();
+    let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wal)));
+    let collection = Collection::new("test_collection".to_string(), storage, 10);
     let document = Document::new(doc! { "key": "value" }, DocumentType::Persistent);
     let doc_id = document.id.clone();
 
@@ -34,8 +37,9 @@ async fn test_insert_and_find_document() {
 async fn test_update_document() {
     let dir = tempdir().unwrap();
     let wal_path = dir.path().join("wal.log");
-    let wal = Arc::new(RwLock::new(Wal::new(wal_path).unwrap()));
-    let collection = Collection::new("test_collection".to_string(), wal, 10);
+    let wal = Wal::new(wal_path).unwrap();
+    let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wal)));
+    let collection = Collection::new("test_collection".to_string(), storage, 10);
     let mut document = Document::new(doc! { "key": "value" }, DocumentType::Persistent);
     let doc_id = document.id.clone();
 
@@ -53,8 +57,9 @@ async fn test_update_document() {
 async fn test_delete_document() {
     let dir = tempdir().unwrap();
     let wal_path = dir.path().join("wal.log");
-    let wal = Arc::new(RwLock::new(Wal::new(wal_path).unwrap()));
-    let collection = Collection::new("test_collection".to_string(), wal, 10);
+    let wal = Wal::new(wal_path).unwrap();
+    let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wal)));
+    let collection = Collection::new("test_collection".to_string(), storage, 10);
     let document = Document::new(doc! { "key": "value" }, DocumentType::Persistent);
     let doc_id = document.id.clone();
 

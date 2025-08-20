@@ -1,7 +1,8 @@
+use crate::cache::CacheConfig;
 use crate::collection::Collection;
 use crate::document::DocumentType;
-use crate::cache::CacheConfig;
 use crate::wal::Wal;
+use crate::wasp::{StorageEngine, Wasp};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -11,15 +12,15 @@ const DEFAULT_CACHE_CAPACITY: usize = 1024;
 
 pub struct Engine {
     pub collections: RwLock<HashMap<String, Arc<Collection>>>,
-    pub wal: Arc<RwLock<Wal>>,
+    pub storage: Arc<RwLock<Box<dyn StorageEngine>>>,
 }
 
 impl Engine {
     pub fn new(wal_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let wal = Arc::new(RwLock::new(Wal::new(wal_path)?));
+        let wal = Wal::new(wal_path)?;
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
-            wal,
+            storage: Arc::new(RwLock::new(Box::new(wal))),
         };
 
         // Create the hidden collection for temporary documents on startup.
@@ -27,8 +28,8 @@ impl Engine {
 
         // Load ephemeral documents from the WAL into the cache.
         {
-            let wal_lock = engine.wal.read();
-            let operations = wal_lock.read_all()?;
+            let storage = engine.storage.read();
+            let operations = storage.read_all()?;
             for op in operations {
                 if let Ok(operation) = op {
                     match operation {
@@ -51,7 +52,7 @@ impl Engine {
         let mut collections = self.collections.write();
         let collection = Arc::new(Collection::new(
             name.clone(),
-            self.wal.clone(),
+            self.storage.clone(),
             DEFAULT_CACHE_CAPACITY,
         ));
         collections.insert(name, collection.clone());
@@ -62,7 +63,7 @@ impl Engine {
         let mut collections = self.collections.write();
         let collection = Arc::new(Collection::new_with_config(
             name.clone(),
-            self.wal.clone(),
+            self.storage.clone(),
             config,
         ));
         collections.insert(name, collection.clone());
@@ -79,5 +80,16 @@ impl Engine {
 
     pub fn list_collection_names(&self) -> Vec<String> {
         self.collections.read().keys().cloned().collect()
+    }
+}
+
+impl Engine {
+    /// Construct an Engine backed by the WASP storage engine.
+    pub fn with_wasp(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        let wasp = Wasp::new(path)?;
+        Ok(Self {
+            collections: RwLock::new(HashMap::new()),
+            storage: Arc::new(RwLock::new(Box::new(wasp))),
+        })
     }
 }

@@ -1,38 +1,38 @@
 use crate::cache::Cache;
 use crate::document::Document;
 use crate::types::{DocumentId, Operation};
-use crate::wal::Wal;
+use crate::wasp::StorageEngine;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct Collection {
     pub name: String,
     pub cache: Cache,
-    wal: Arc<RwLock<Wal>>,
+    storage: Arc<RwLock<Box<dyn StorageEngine>>>,
 }
 
 impl Collection {
-    pub fn new(name: String, wal: Arc<RwLock<Wal>>, cache_capacity: usize) -> Self {
+    pub fn new(name: String, storage: Arc<RwLock<Box<dyn StorageEngine>>>, cache_capacity: usize) -> Self {
         Collection {
             name,
             cache: Cache::new(cache_capacity),
-            wal,
+        storage,
         }
     }
 
-    pub fn new_with_config(name: String, wal: Arc<RwLock<Wal>>, config: crate::cache::CacheConfig) -> Self {
+    pub fn new_with_config(name: String, storage: Arc<RwLock<Box<dyn StorageEngine>>>, config: crate::cache::CacheConfig) -> Self {
         Collection {
             name,
             cache: Cache::new_with_config(config),
-            wal,
+        storage,
         }
     }
 
     pub fn insert_document(&self, document: Document) -> DocumentId {
         let doc_id = document.id.clone();
-        self.cache.insert(document.clone());
-        let operation = Operation::Insert { document };
-        self.wal.write().append(&operation).expect("Failed to append insert operation to WAL");
+    self.cache.insert(document.clone());
+    let operation = Operation::Insert { document };
+    self.storage.write().append(&operation).expect("Failed to append insert operation to storage");
         doc_id
     }
 
@@ -44,7 +44,7 @@ impl Collection {
         if self.cache.get(id).is_some() {
             self.cache.insert(new_document.clone());
             let operation = Operation::Update { document_id: id.clone(), new_document };
-            self.wal.write().append(&operation).expect("Failed to append update operation to WAL");
+            self.storage.write().append(&operation).expect("Failed to append update operation to storage");
             true
         } else {
             false
@@ -54,7 +54,7 @@ impl Collection {
     pub fn delete_document(&self, id: &DocumentId) -> bool {
         if self.cache.remove(id).is_some() {
             let operation = Operation::Delete { document_id: id.clone() };
-            self.wal.write().append(&operation).expect("Failed to append delete operation to WAL");
+            self.storage.write().append(&operation).expect("Failed to append delete operation to storage");
             true
         } else {
             false
