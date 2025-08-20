@@ -3,3 +3,4 @@
 ProjectStructure.md
 generate_project_structure.py
 coding_prompts.txt
+*.bin

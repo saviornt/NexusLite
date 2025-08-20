@@ -144,13 +144,49 @@ Future features will always build on stable, well-tested foundations.
 
 ### Sprint 4 - Import & Export Features
 
-- [ ] Implment import features to import various data formats.
+- [x] Implement import features to import various data formats.
   - The importer should infer what data format is being imported.
   - Once inferred, it should import the data into the database properly formatted.
   - At a minimum, the importer should support CSV, JSON, BSON and Pandas DataFrame formats.
-- [ ] Implement export features to export to various data formats.
-- [ ] Perform tests and then troubleshoot and fix any issues.
+- [x] Implement export features to export to various data formats.
+- [x] Perform tests and then troubleshoot and fix any issues.
 - [ ] Update Developer Documentation (Project_Development.md).
+
+#### Detailed checklist for Sprint 4
+
+- [x] Define import/export API contracts and options
+  - [x] `import_from_reader`/`import_file` and `export_to_writer`/`export_file`
+  - [x] Options include: `format (auto|ndjson|csv|bson)`, `collection`, `batch_size`, `persistent`, `ttl_field`, `skip_errors`
+  - [x] Per-format options: CSV `{ delimiter, has_headers, type_infer? }`, JSON `{ array_mode?, pretty? }`
+- [x] Prioritize streaming formats (memory-safe, large files)
+  - [x] NDJSON (JSON Lines) import/export (stream via serde_json deserializer)
+  - [x] CSV import/export (headers, delimiter support; stream via csv::Reader/Writer)
+  - [x] BSON import/export (length-prefixed docs; stream read/write)
+- [x] Format auto-detection with explicit override
+  - [x] Use file extension as hint, then sniff first KB for: BOM/UTF-16, JSON tokens, CSV delimiter patterns, BSON length prefix
+  - [x] Allow forcing the format via options when detection is ambiguous
+- [x] Performance and memory controls
+  - [x] Batch inserts with backpressure (configurable `batch_size`)
+  - [x] Streamed IO with BufRead/Write; avoid loading entire datasets into memory
+- [x] TTL and IDs mapping
+  - [x] Optional `ttl_field` maps to ephemeral documents; otherwise persistent
+  - [x] Accept optional `_id`; generate UUID if missing
+- [x] Errors and reporting
+  - [x] `skip_errors` mode: continue on row errors
+  - [x] Produce sidecar `.errors.jsonl` with failed rows and reasons
+  - [x] Return `ImportReport`/`ExportReport` with counts and timing
+- [x] CLI integration (developer ergonomics)
+  - [x] Programmatic CLI commands wired for import/export with tests
+- [x] Windows-friendly file operations
+  - [x] Export to a temp file and atomically replace destination (MoveFileExW with replace; fallback std::fs::rename + short retry)
+- [x] Testing
+  - [x] Unit tests for CSV/NDJSON/BSON parsers and type mapping
+  - [x] Round-trip tests (import → export → compare)
+  - [x] Large-file smoke tests (bounded memory)
+  - [x] Windows path/encoding and atomic rename behavior
+- [x] Documentation
+  - [x] Update Project_Development.md with Sprint 4 completion
+  - [x] README examples and pandas notes (NDJSON: `lines=True`)
 
 ### Sprint 5 - Querying & APIs
 
@@ -161,15 +197,18 @@ Future features will always build on stable, well-tested foundations.
 - [ ] Deployment tooling (CLI & embedded support).
 - [ ] Perform tests and then troubleshoot and fix any issues.
 - [ ] Update Developer Documentation (Project_Development.md).
+- [ ] Update `README.md` documentation.
 
 ### Sprint 6 - Optimization, Extensions, Additional Features
 
 - [ ] Indexing strategies.
 - [ ] Transaction support.
+- [ ] Full clap-based binary UX for CLI integration.
 - [ ] Implement Key/Pair based encryption and decryption using ECC-256 bit encryption.
 - [ ] Implement signature verification using ECDSA.
 - [ ] Perform tests and then troubleshoot and fix any issues.
 - [ ] Update Developer Documentation (Project_Development.md).
+- [ ] Update `README.md` documentation.
 
 ---
 
@@ -261,79 +300,194 @@ nexus_lite
 
 ### Document Module: document.rs
 
-- Purpose: Represents BSON-like records.
+- Purpose: BSON-backed document with metadata, IDs, and TTL for ephemeral records.
 - Features:
-  - Document::new() --> create with UUID.
-  - Document::update() --> update existing document.
+  - UUID v4 `DocumentId` assigned on creation
+  - `DocumentType` (Persistent or Ephemeral)
+  - Metadata: created_at, updated_at, optional TTL
+  - `set_ttl`, `get_ttl`, `is_expired` helpers
+  - `update` updates data and bumps `updated_at`
 
 ### Collection Module: collection.rs
 
-- Purpose: Group of documents.
+- Purpose: Manage documents with a TTL-first + LRU cache and durable storage append.
 - Features:
-  - Collection::new() --> Create a new collection with name and uuid.
-  - Collection::insert_document() --> Insert a document.
-  - Collection::find_document() --> Find a document by ID.
-  - Collection::update_document() --> Update a document.
-  - Collection::delete_document() --> Delete a document.
-  - Collection::list_document_ids() --> List all document IDs.
-- Future Additions:
-  - Create a vector map for searching.
-  - Querying and indexing.
+  - `new` and `new_with_config` to construct with cache capacity or config
+  - `insert_document` writes to cache and appends Operation::Insert to storage
+  - `find_document` reads from cache by ID
+  - `update_document` upserts in cache and appends Operation::Update
+  - `delete_document` evicts from cache and appends Operation::Delete
+  - `get_all_documents` returns a snapshot Vec&lt;Document&gt; (clones; not streaming)
+  - `cache_metrics` exposes cache metrics snapshot
+  - Thread-safe via parking_lot::RwLock on storage
 
 ### Cache Module: cache.rs
 
+- Purpose: In-memory cache with TTL-first plus LRU eviction to keep hot data fast.
+- Features:
+  - TTL expiration takes priority; lazy expiration on access
+  - LRU sampling with configurable max_samples when no TTLs are expired
+  - Eviction batching and guard to prevent thundering evictions
+  - Background sweeper with configurable interval
+  - Per-collection cache configuration and runtime tuning
+  - Metrics: hits/misses, eviction counts, memory/latency stats
+
 ### WAL Module: wal.rs
+
+- Purpose: Append-only write-ahead log to ensure durability and enable recovery.
+- Features:
+  - Append operations before commit for crash consistency
+  - Read/replay log records on startup to rebuild state
+  - Lightweight record format with basic integrity checks
+  - Used as an alternative pluggable backend for benchmarking
+
+### WASP Module: wasp.rs
 
 ### Types Module: types.rs
 
+- Purpose: Shared core types for IDs, operations, and metadata.
+- Features:
+  - Strongly-typed DocumentId (UUID v4)
+  - Operation enums for insert/update/delete
+  - Reusable structs/enums for cache and storage coordination
+
 ### Errors Module: errors.rs
+
+- Purpose: Centralized error definitions with rich context.
+- Features:
+  - thiserror-based DbError for ergonomic error handling
+  - Variants for IO, serialization, and domain errors (e.g., NoSuchCollection)
+  - Consistent messages surfaced across modules and CLI
 
 ### Engine Module: engine.rs
 
+- Purpose: Orchestrates collections and persistence backends.
+- Features:
+  - Create/get/delete collections; list collection names
+  - Pluggable storage: WAL or WASP (default via Engine::with_wasp)
+  - Hidden `_tempDocuments` collection for ephemeral docs
+  - On startup, loads ephemeral docs into cache when applicable
+  - Thread-safe via parking_lot::RwLock
+
 ### Logger Module: logger.rs
+
+- Purpose: Initialize structured logging for the system.
+- Features:
+  - log/log4rs setup via `logger::init()`
+  - Configurable levels and appenders through `log4rs.yaml`
 
 ### Import Module: import.rs
 
+- Purpose: Streaming data ingestion for CSV, NDJSON (JSON Lines), and BSON.
+- Features:
+  - Auto-detect format with explicit override
+  - Per-format options: CSV (delimiter, headers, type inference), JSON (array_mode)
+  - skip_errors with sidecar `.errors.jsonl` capturing failures
+  - TTL mapping via `ttl_field` for ephemeral documents; persistent toggle
+  - Progress logging and basic batching controls
+
 ### Export Module: export.rs
+
+- Purpose: Streaming export of collections to CSV, NDJSON, or BSON.
+- Features:
+  - CSV with optional headers and custom delimiter
+  - NDJSON line-by-line output for large files
+  - BSON length-prefixed streaming writer
+  - Writes to temp file then atomically replaces destination (Windows-safe)
+  - Returns ExportReport with written counts
 
 ### API Module: api.rs
 
 - Purpose: Provides a Rust API abstraction for embedding into apps.
+- Features:
+  - Convenience helpers around core engine operations
+  - Stable surface for embedding while internals evolve
 
 ### CLI Module: cli.rs
 
 - Purpose: Provides CLI support for developers and database administration.
+- Features:
+  - Command enum with Import/Export operations
+  - Simple format parsers and option mapping
+  - Programmatic entrypoint `cli::run(engine, cmd)` returning reports
 
 ### Database Module: lib.rs
 
+- Purpose: User-facing database wrapper around Engine with ergonomic helpers.
+- Features:
+  - `Database::new()` and `Database::open(path)` for setup
+  - Collection management: create/get/delete, list names
+  - Document helpers: insert/update/delete
+  - `nexus_lite::init()` to initialize logging
+
 ---
 
-## Example Usage (Sprint 1)
+## Example Usage
 
 ```rust
-use serde_json::json;
-use nexus_lite::{Database, Document};
+use bson::doc;
+use nexus_lite::document::{Document, DocumentType};
+use nexus_lite::Database;
 
-fn main() {
-    let mut db = Database::new();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  // Initialize system (logger, etc.)
+  nexus_lite::init()?;
 
-    // Create a collection
-    db.create_collection("users");
+  // Create or open database (WASP-backed by default)
+  let db = Database::new()?;
 
-    // Insert a document
-    let user_doc = Document::new(json!({"username": "alice", "age": 30}));
-    let users = db.get_collection_mut("users").unwrap();
-    let doc_id = users.insert_document(user_doc);
+  // Create a collection
+  db.create_collection("users");
 
-    // Query document
-    let found = users.find_document(&doc_id).unwrap();
-    println!("Found: {:?}", found);
+  // Insert a document
+  let user_doc = Document::new(doc!({"username": "alice", "age": 30}), DocumentType::Persistent);
+  let doc_id = db.insert_document("users", user_doc)?;
 
-    // Update document
-    let updated = Document::new(json!({"username": "alice", "age": 31}));
-    users.update_document(&doc_id, updated);
+  // Query document
+  let users = db.get_collection("users").unwrap();
+  let found = users.find_document(&doc_id).unwrap();
+  println!("Found: {:?}", found);
 
-    // Delete document
-    users.delete_document(&doc_id);
+  // Update document
+  let updated = Document::new(doc!({"username": "alice", "age": 31}), DocumentType::Persistent);
+  db.update_document("users", &doc_id, updated)?;
+
+  // Delete document
+  db.delete_document("users", &doc_id)?;
+  Ok(())
 }
 ```
+
+---
+
+## Import & Export Usage Examples
+
+Programmatic usage:
+
+```rust
+use nexus_lite::engine::Engine;
+use nexus_lite::import::{import_file, ImportOptions, ImportFormat};
+use nexus_lite::export::{export_file, ExportOptions, ExportFormat};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let engine = Engine::with_wasp(std::path::PathBuf::from("nexus.wasp"))?;
+
+  // Import NDJSON (auto-detected by extension)
+  let mut iopts = ImportOptions::default();
+  iopts.collection = "events".into();
+  iopts.format = ImportFormat::Auto; // Csv/Ndjson/Bson also supported
+  let _irep = import_file(&engine, "data/events.jsonl", &iopts)?;
+
+  // Export collection as CSV
+  let mut eopts = ExportOptions::default();
+  eopts.format = ExportFormat::Csv;
+  eopts.csv.write_headers = true;
+  let _erep = export_file(&engine, "events", "export/events.csv", &eopts)?;
+  Ok(())
+}
+```
+
+Notes
+
+- To continue past bad rows and log them, set `iopts.skip_errors = true` and `iopts.error_sidecar = Some("events.errors.jsonl".into())`.
+- Pandas reads exported NDJSON via `pd.read_json('export/events.jsonl', lines=True)`.
