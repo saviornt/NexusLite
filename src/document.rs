@@ -1,8 +1,8 @@
-use chrono::{DateTime, Utc};
+use crate::types::{DocumentId, SerializableBsonDocument, SerializableDateTime};
+use bson::Document as BsonDocument;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use bson::{Document as BsonDocument, Bson};
 use std::time::Duration;
-use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum DocumentType {
@@ -10,10 +10,10 @@ pub enum DocumentType {
     Ephemeral,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Metadata {
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: SerializableDateTime,
+    pub updated_at: SerializableDateTime,
     pub document_type: DocumentType,
     pub ttl: Option<Duration>,
 }
@@ -21,26 +21,26 @@ pub struct Metadata {
 impl Metadata {
     pub fn new(document_type: DocumentType) -> Self {
         Self {
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: SerializableDateTime(Utc::now()),
+            updated_at: SerializableDateTime(Utc::now()),
             document_type,
             ttl: None,
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Document {
-    pub id: Uuid,
-    pub data: BsonDocument,
+    pub id: DocumentId,
+    pub data: SerializableBsonDocument,
     pub metadata: Metadata,
 }
 
 impl Document {
     pub fn new(data: BsonDocument, document_type: DocumentType) -> Self {
         Self {
-            id: Uuid::new_v4(),
-            data,
+            id: DocumentId::new(),
+            data: SerializableBsonDocument(data),
             metadata: Metadata::new(document_type),
         }
     }
@@ -57,7 +57,7 @@ impl Document {
 
     pub fn is_expired(&self) -> bool {
         if let Some(ttl) = self.metadata.ttl {
-            let elapsed = Utc::now().signed_duration_since(self.metadata.updated_at);
+            let elapsed = Utc::now().signed_duration_since(self.metadata.updated_at.0);
             elapsed > chrono::Duration::from_std(ttl).unwrap()
         } else {
             false
@@ -65,23 +65,7 @@ impl Document {
     }
 
     pub fn update(&mut self, new_data: BsonDocument) {
-        self.data = new_data;
-        self.metadata.updated_at = Utc::now();
-    }
-
-    pub fn find(&self, path: &str) -> Option<&Bson> {
-        let parts: Vec<&str> = path.split('.').collect();
-        let mut current_doc = &self.data;
-
-        for (i, part) in parts.iter().enumerate() {
-            if i == parts.len() - 1 {
-                // Last part, try to get the Bson value
-                return current_doc.get(*part);
-            } else {
-                // Not the last part, try to get a nested document
-                current_doc = current_doc.get_document(*part).ok()?;
-            }
-        }
-        None // Should not be reached for valid paths
+        self.data = SerializableBsonDocument(new_data);
+        self.metadata.updated_at = SerializableDateTime(Utc::now());
     }
 }

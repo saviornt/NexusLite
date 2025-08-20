@@ -1,5 +1,6 @@
 use nexus_lite::document::{Document, DocumentType};
-use bson::{doc};
+use nexus_lite::types::SerializableBsonDocument;
+use bson::doc;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ fn test_create_persistent_document() {
     let data = doc! { "name": "persistent_doc", "value": 1 };
     let doc = Document::new(data.clone(), DocumentType::Persistent);
 
-    assert_eq!(doc.data, data);
+    assert_eq!(doc.data, SerializableBsonDocument(data));
     assert_eq!(doc.metadata.document_type, DocumentType::Persistent);
     assert!(doc.metadata.ttl.is_none());
 }
@@ -18,7 +19,7 @@ fn test_create_ephemeral_document() {
     let data = doc! { "name": "ephemeral_doc", "value": 2 };
     let mut doc = Document::new(data.clone(), DocumentType::Ephemeral);
 
-    assert_eq!(doc.data, data);
+    assert_eq!(doc.data, SerializableBsonDocument(data));
     assert_eq!(doc.metadata.document_type, DocumentType::Ephemeral);
     assert!(doc.metadata.ttl.is_none());
 
@@ -52,4 +53,15 @@ fn test_persistent_document_cannot_have_ttl() {
 
     assert!(doc.metadata.ttl.is_none());
     assert!(!doc.is_expired());
+}
+
+#[test]
+fn test_document_update() {
+    let data = doc! { "name": "original_doc", "value": 5 };
+    let mut doc = Document::new(data, DocumentType::Persistent);
+
+    let new_data = doc! { "name": "updated_doc", "value": 6 };
+    doc.update(new_data.clone());
+
+    assert_eq!(doc.data, SerializableBsonDocument(new_data));
 }

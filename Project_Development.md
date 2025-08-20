@@ -21,10 +21,11 @@ Future features will always build on stable, well-tested foundations.
 - [x] Implement error handling and logging using the crates `log` and `log4rs`.
 - [x] Implement `Document` module (`document.rs`)
   - Create, find, update, delete BSON-like documents.
-  - When creating a new document, the document will be assigned a document UUID.
+  - When creating a new document, the document will be assigned a document UUID v4.
   - Documents will also store metadata that describes the document details.
   - There should be two types of documents: persistent and temporary.
   - Temporary document metadata will support an optional Time-To-Live (TTL) and are stored in a hidden collection and loaded into memory on startup.
+  - Allow metadata (timestamps, versioning, or user tags) be optional extension points from the start. Future upgrades benefit from this flexibility.
 - [x] Implement `Collection` module (`collection.rs`)
   - Manage sets of documents inside named collections.
   - Collections will maintain an index of document UUIDs.
@@ -34,21 +35,51 @@ Future features will always build on stable, well-tested foundations.
   - Manage multiple collections.
   - Create, save, delete database files.
 - [x] Implement Rust API calls to database engine (`lib.rs`)
+  - Add builder patterns (e.g. `Document::builder().field(...).build()`), to make creation more fluent.
+- [ ] Ensure `RwLock` use is properly scoped.
+  - Benchmark read-heavy scenarios to spot deadlocks early.
 - [x] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
 - [x] Generate Rust documentation (RustDoc) using `cargo doc`.
 - [x] Perform tests and then troubleshoot and fix any issues.
   - Due to how logging works, we do not use a `mod_logging.rs` file since we cannot have 2 loggers be initialized at the same time.
+  - Add tests around invalid UUIDs, empty collections, or creating duplicate collection names to prove resilience.
 - [x] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 2 - Cache Layer (Redis-inspired)
 
-- [ ] Implement a **Hybrid TTL & LRU eviction policy**. TTL has highest priority.
-- [ ] Implement the **cache using the hybrid eviction policy** for documents.
-  - Use a **lazy eviction + periodic low-priority background purging** strategy.
-- [ ] Cache → WAL → storage persistence pipeline.
-- [ ] Implement logic to load all documents from the internal `_tempDocuments` collection into the cache on database startup.
-- [ ] Perform tests and then troubleshoot and fix any issues.
-- [ ] Update Developer Documentation (Project_Development.md).
+- [x] Implement a **Hybrid TTL & LRU eviction policy**.
+  - [x] TTL has highest priority. Always evict entries whose TTL has expired before considering LRU-based eviction.
+  - [x] Fallback to LRU sampling when no TTL-expired entries are found; sample size configurable via `max_samples`.
+  - [x] Implemented approximation of LRU using tail sampling; tunable `max_samples` available.
+  - [x] Strategy aligns with keeping freshness over recency.
+  - [x] Separated sections in `cache.rs` combining TTL + LRU.
+- [x] Include comprehensive metrics as part of the cache layer:
+  - [x] Hit/miss counters
+  - [x] Eviction counts by type (TTL vs LRU)
+  - [ ] Memory/latency stats (Deferred)
+- [x] Give the system flexibility to tune eviction behavior:
+  - [x] Runtime adjustable `max_samples`, `batch_size`, `capacity`, and eviction mode
+  - [x] Per-collection overrides via `Engine::create_collection_with_config`
+- [x] Implement a guard against thundering evictions:
+  - [x] Eviction batching
+  - [x] Eviction lock to prevent concurrent eviction cycles
+- [x] Handle TTL expiration proactively
+  - [x] Background sweeper with configurable interval
+  - [x] Lazy expiration on access increments miss count
+- [x] Allow configuration of TTL and LRU parameters at runtime.
+  - [x] Eviction modes: `ttl-first`, `lru-only`, `ttl-only`, `hybrid`
+  - [x] Per-collection override supported
+- [x] Implement the **cache using the hybrid eviction policy** for documents.
+  - [x] Lazy eviction + periodic low-priority background purging
+  - [x] Purge trigger exposed for deterministic tests
+- [x] Implement logic to load all ephemeral documents from the internal `_tempDocuments` collection into the cache on database startup.
+- [x] Perform tests and then troubleshoot and fix any issues.
+- [x] Perform unit tests for each scenario:
+  - [x] TTL expiration evicts before LRU
+  - [x] LRU sampling when no TTLs are expired
+  - [x] Batching and lock under concurrent pressure
+  - [x] Lazy-expiration counts as miss
+- [x] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 3 - Persistence
 
