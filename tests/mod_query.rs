@@ -28,8 +28,11 @@ fn update_set_inc_unset() {
 #[test]
 fn find_sort_project_paginate() {
     use nexus_lite::engine::Engine;
-    use std::path::PathBuf;
-    let engine = Engine::new(PathBuf::from("wal_query.bin")).unwrap();
+    use tempfile::tempdir;
+    let dir = tempdir().unwrap();
+    let db_name = "qtestdb";
+    let wal_path = dir.path().join(format!("{}_wasp_query.bin", db_name));
+    let engine = Engine::new(wal_path).unwrap();
     let col = engine.create_collection("qtest".into());
     col.insert_document(Document::new(doc!{"age": 30, "name": "alice"}, DocumentType::Persistent));
     col.insert_document(Document::new(doc!{"age": 40, "name": "bob"}, DocumentType::Persistent));

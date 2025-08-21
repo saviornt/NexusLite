@@ -46,4 +46,7 @@ pub enum DbError {
 
     #[error("Query error: {0}")]
     QueryError(String),
+
+    #[error("Database Not Found")]
+    DatabaseNotFound,
 }

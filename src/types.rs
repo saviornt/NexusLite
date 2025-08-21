@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use crate::document::Document;
 
 /// A wrapper around `uuid::Uuid` to ensure Bincode serialization compatibility.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DocumentId(pub Uuid);
 
 impl DocumentId {

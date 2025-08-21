@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 pub enum Command {
     // Database & Collections management
+    DbCreate { db_path: Option<PathBuf> },
     DbOpen { db_path: PathBuf },
+    DbClose { db_path: PathBuf },
     ColCreate { name: String },
     ColDelete { name: String },
     ColList,
@@ -43,8 +45,22 @@ fn parse_export_format(s: &Option<String>) -> ExportFormat {
 
 pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
-        Command::DbOpen { db_path: _ } => {
-            // Placeholder: opening is handled by host before passing Engine. No-op here.
+        Command::DbCreate { db_path } => {
+            let path_str = db_path.as_ref().and_then(|p| p.to_str());
+            let db = crate::Database::new(path_str)?;
+            println!("created={}.db name={}", db.name(), db.name());
+            Ok(())
+        }
+        Command::DbOpen { db_path } => {
+            let p = db_path.to_str().ok_or("invalid path")?;
+            let db = crate::Database::open(p)?;
+            println!("opened name={}", db.name());
+            Ok(())
+        }
+        Command::DbClose { db_path } => {
+            let p = db_path.to_str().ok_or("invalid path")?;
+            crate::Database::close(Some(p))?;
+            println!("closed path={}", p);
             Ok(())
         }
         Command::ColCreate { name } => {

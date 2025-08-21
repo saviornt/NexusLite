@@ -298,7 +298,9 @@ nexus_lite
 
 - Purpose: User-facing database wrapper around Engine with ergonomic helpers.
 - Features:
-  - `Database::new()` and `Database::open(path)` for setup
+  - `Database::new(name_or_path: Option<&str>)` to create the DB (and `.wasp`) if missing
+  - `Database::open(name_or_path: Option<&str>)` to open an existing DB (errors `Database Not Found` if missing)
+  - `Database::close(name_or_path: Option<&str>)` to close/unregister an open DB handle
   - Collection management: create/get/delete, list names, `rename_collection`
   - Document helpers: insert/update/delete
   - `nexus_lite::init()` to initialize logging
@@ -317,7 +319,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   nexus_lite::init()?;
 
   // Create or open database (WASP-backed by default)
-  let db = Database::new()?;
+  // Use default name (nexuslite.db / nexuslite.wasp)
+  let db = Database::new(None)?;
 
   // Create a collection
   db.create_collection("users");

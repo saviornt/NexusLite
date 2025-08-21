@@ -53,32 +53,41 @@ Future features will always build on stable, well-tested foundations.
   - [x] Implemented approximation of LRU using tail sampling; tunable `max_samples` available.
   - [x] Strategy aligns with keeping freshness over recency.
   - [x] Separated sections in `cache.rs` combining TTL + LRU.
+
 - [x] Include comprehensive metrics as part of the cache layer:
   - [x] Hit/miss counters
   - [x] Eviction counts by type (TTL vs LRU)
   - [x] Memory/latency stats
+
 - [x] Give the system flexibility to tune eviction behavior:
   - [x] Runtime adjustable `max_samples`, `batch_size`, `capacity`, and eviction mode
   - [x] Per-collection overrides via `Engine::create_collection_with_config`
+
 - [x] Implement a guard against thundering evictions:
   - [x] Eviction batching
   - [x] Eviction lock to prevent concurrent eviction cycles
+
 - [x] Handle TTL expiration proactively
   - [x] Background sweeper with configurable interval
   - [x] Lazy expiration on access increments miss count
+
 - [x] Allow configuration of TTL and LRU parameters at runtime.
   - [x] Eviction modes: `ttl-first`, `lru-only`, `ttl-only`, `hybrid`
   - [x] Per-collection override supported
+
 - [x] Implement the **cache using the hybrid eviction policy** for documents.
   - [x] Lazy eviction + periodic low-priority background purging
   - [x] Purge trigger exposed for deterministic tests
+
 - [x] Implement logic to load all ephemeral documents from the internal `_tempDocuments` collection into the cache on database startup.
 - [x] Perform tests and then troubleshoot and fix any issues.
+
 - [x] Perform unit tests for each scenario:
   - [x] TTL expiration evicts before LRU
   - [x] LRU sampling when no TTLs are expired
   - [x] Batching and lock under concurrent pressure
   - [x] Lazy-expiration counts as miss
+
 - [x] Update Developer Documentation (Project_Development.md).
 
 ### Sprint 3 - Persistence
@@ -86,6 +95,7 @@ Future features will always build on stable, well-tested foundations.
 - [x] Implement a hybrid crash-consistent storage engine (`Write-Ahead Shadow-Paging` or `WASP`; `wasp.rs`) and make it the default backend.
 - [x] Pluggable storage engine: swap between WAL and WASP for benchmarking.
 - [x] Add a benchmark test comparing WAL vs WASP, saving results to `benchmarks/`.
+
 - [x] Phase 0: Design and requirements for WASP:
   - [x] Define requirements/goals (ACID level, workload patterns, durability guarantees, concurrency model).
   - [x] Decide page size (e.g., 8–16 KB) and segment size targets (e.g., 64–256 MB).
@@ -94,12 +104,14 @@ Future features will always build on stable, well-tested foundations.
   - [x] Choose on-disk format endianness, alignment, and checksums.
   - [x] Implement block allocator / free space map abstraction.
   - [x] Build manifest structure (root pointer + active segments + WAL metadata).
+
 - [x] Phase 1: Minimal CoW Engine
   - [x] Implement page format (headers, checksums, version ids).
   - [x] Implement copy-on-write B-tree or LSM-like node tree for data storage.
   - [x] Add manifest write and atomic pointer flip (double-buffered).
   - [x] Implement crash-safe read path (scan manifest → open latest root).
   - [x] Unit test: basic insert/read/delete, durability after crash simulation.
+
 - [x] Phase 2: Tiny WAL Layer
   - [x] Design WAL record format: {txn id, page ids, checksums, new root id, epoch}.
   - [x] Add WAL append + fdatasync logic.
@@ -107,35 +119,41 @@ Future features will always build on stable, well-tested foundations.
   - [x] Integrate WAL into commit path (before manifest flip).
   - [x] Recovery logic: read manifest, replay WAL to finish incomplete CoW updates.
   - [x] Stress test: power-fail injection during updates. (basic test via append/recover)
+
 - [x] Phase 3: Immutable Segment Store
   - [x] Define segment file format (sorted key ranges, fence keys, bloom filters).
   - [x] Add logic to seal cold data into segments (CoW → segment flush).
   - [x] Implement read path that merges CoW + segments.
   - [x] Add bloom filter acceleration for segment lookups.
   - [x] Unit test: query workload across mixed hot/cold data.
+
 - [x] Phase 4: Compaction & Space Reclaim
   - [x] Implement background compaction engine (leveled or tiered).
   - [x] Add token-bucket throttling to cap IO usage. (future)
   - [x] Integrate with free space map to recycle old pages/segments.
   - [x] Add epoch-based GC for safe cleanup of obsolete data.
   - [x] Stress test: long-running workload without space leaks.
+
 - [x] Phase 5: Concurrency & MVCC
   - [x] Add epoch-based snapshot tracking for readers.
   - [x] Implement MVCC visibility rules (readers see stable snapshot, writers advance epochs).
   - [x] Optimize for multiple concurrent readers, single writer (common embedded pattern).
   - [x] Benchmark concurrent read-write workloads. (future)
+
 - [x] Phase 6: Durability & Integrity Hardening
   - [x] Add end-to-end checksums (pages, WAL, manifest, segments).
   - [x] Add torn-write protection (length-prefixed records, double-write slots).
   - [x] Optionally support copy-verify (read-after-write) for non-power-safe devices. (future)
   - [x] Build consistency checker tool (fsck-style).
   - [x] Fuzz test: corrupt WAL/pages/manifest, ensure graceful recovery.
+
 - [x] Phase 7: Performance & Productionization
   - [x] Implement block cache for hot pages/segments.
   - [x] Add prefetch/pipelining for sequential scans.
   - [x] Optimize manifest updates (batch multiple commits per flip).
   - [x] Add statistics & metrics (WAL usage, compaction debt, cache hit ratio).
   - [x] Benchmark against baseline DBs (SQLite WAL, LMDB, RocksDB).
+
 - [x] Implement collection snapshots. (stub)
 - [x] Store the database in a **single file** (like SQLite) with a separate file for the WASP engine (`{db_name}.wasp` file).
 - [x] Implement a periodic, configurable **checkpointing process** to merge the WASP into the main database file.
@@ -158,32 +176,41 @@ Future features will always build on stable, well-tested foundations.
   - [x] `import_from_reader`/`import_file` and `export_to_writer`/`export_file`
   - [x] Options include: `format (auto|ndjson|csv|bson)`, `collection`, `batch_size`, `persistent`, `ttl_field`, `skip_errors`
   - [x] Per-format options: CSV `{ delimiter, has_headers, type_infer? }`, JSON `{ array_mode?, pretty? }`
+
 - [x] Prioritize streaming formats (memory-safe, large files)
   - [x] NDJSON (JSON Lines) import/export (stream via serde_json deserializer)
   - [x] CSV import/export (headers, delimiter support; stream via csv::Reader/Writer)
   - [x] BSON import/export (length-prefixed docs; stream read/write)
+
 - [x] Format auto-detection with explicit override
   - [x] Use file extension as hint, then sniff first KB for: BOM/UTF-16, JSON tokens, CSV delimiter patterns, BSON length prefix
   - [x] Allow forcing the format via options when detection is ambiguous
+
 - [x] Performance and memory controls
   - [x] Batch inserts with backpressure (configurable `batch_size`)
   - [x] Streamed IO with BufRead/Write; avoid loading entire datasets into memory
+
 - [x] TTL and IDs mapping
   - [x] Optional `ttl_field` maps to ephemeral documents; otherwise persistent
   - [x] Accept optional `_id`; generate UUID if missing
+
 - [x] Errors and reporting
   - [x] `skip_errors` mode: continue on row errors
   - [x] Produce sidecar `.errors.jsonl` with failed rows and reasons
   - [x] Return `ImportReport`/`ExportReport` with counts and timing
+
 - [x] CLI integration (developer ergonomics)
   - [x] Programmatic CLI commands wired for import/export with tests
+
 - [x] Windows-friendly file operations
   - [x] Export to a temp file and atomically replace destination (MoveFileExW with replace; fallback std::fs::rename + short retry)
+
 - [x] Testing
   - [x] Unit tests for CSV/NDJSON/BSON parsers and type mapping
   - [x] Round-trip tests (import → export → compare)
   - [x] Large-file smoke tests (bounded memory)
   - [x] Windows path/encoding and atomic rename behavior
+
 - [x] Documentation
   - [x] Update Project_Development.md with Sprint 4 completion
   - [x] README examples and pandas notes (NDJSON: `lines=True`)
@@ -207,6 +234,7 @@ Future features will always build on stable, well-tested foundations.
   - [x] Dot-notation field paths for nested documents (e.g., `profile.name.first`)
   - [x] Type coercion for numerics (i32/i64/f64) with strict cross-type rules
   - [x] Clear distinction between missing and null; `$exists` semantics
+
 - [x] Public APIs
   - [x] `find(&self, filter: &Filter, opts: &FindOptions) -> Cursor`
   - [x] `count(&self, filter: &Filter) -> usize`
@@ -214,21 +242,25 @@ Future features will always build on stable, well-tested foundations.
   - [x] `delete_many(&self, filter: &Filter) -> DeleteReport`
   - [x] `Cursor`: iterator over IDs; resolves documents lazily; test-only `to_vec()`
   - [x] `FindOptions { projection, sort, limit, skip }` with `SortSpec { field, order }`
+
 - [x] Update operators
   - [x] `$set`: assign/create nested field paths
   - [x] `$inc`: numeric add; error on non-numeric targets
   - [x] `$unset`: remove field if present
   - [x] `UpdateReport { matched, modified }` (modified only on value change)
+
 - [x] Sort, projection, pagination
   - [x] Stable comparator with multi-key sort; deterministic total order
   - [x] Include-only projection by field paths
   - [x] Enforce reasonable `limit`/`skip` bounds
+
 - [x] CLI (programmatic for now)
   - [x] `query find --collection C --filter JSON --project 'a,b' --sort '-age,+name' --limit N --skip M --output (ndjson|csv|bson)`
   - [x] `query count --collection C --filter JSON`
   - [x] `query update --collection C --filter JSON --update JSON`
   - [x] `query delete --collection C --filter JSON --confirm`
   - [x] Stream results as NDJSON by default; CSV optional (headers)
+
 - [x] Security and safety
   - [x] Parse filter/update via serde into typed structs (no string interpolation)
   - [x] Enforce limits: max filter depth, max array length, max `$in` list size
@@ -237,46 +269,139 @@ Future features will always build on stable, well-tested foundations.
   - [x] Avoid panics; return structured errors; property tests for evaluator
   - [x] Lock scoping: hold RwLocks minimally; snapshot IDs before iteration
   - [x] Memory: prefer iterators; avoid cloning full collections
+
 - [x] Testing
   - [x] Unit: operators, nested paths, numeric coercion, exists/missing, projection
   - [x] Sort comparator correctness (multi-key, missing/null ordering)
   - [x] Update operators: set/inc/unset; matched vs modified
   - [x] Integration: import sample → queries → updates → exports
   - [x] CLI: parse/execute filters/updates; stream output fixtures
+
 - [ ] Documentation
   - [x] README: add “Query & Update” examples (Rust + CLI)
   - [x] Project_Development.md: finalize Sprint 5 spec and checklists
 
 ### Sprint 6 - Optimization, Security Hardening, Additional Features
 
+- [x] Performance/indexing
+  - [x] Initial indexing strategies (exact-match and range on popular fields)
+  - [x] Implement an index manager abstraction to allow for future pluggable index types
+  - [x] Basic index selection for single-field equality/range; fallback to full scan
+  - [x] Track index statistics (size, hit/miss, build time) for observability
+  - [x] Persist index metadata and rebuild if missing or inconsistent
+  - [x] Implement indexing invalidation: Call out when indexes rebuild (insert/update/delete, collection renames) and persistence across restarts
+  - [x] Index + WASP interaction: Define and implement an atomic "commit + index update" step; ensure index metadata/cardinality stays consistent across crashes
+  - [x] Index build mode (acceptance): offline builds block writes to the target collection; reject writes during build with a clear error; tests cover build/rebuild safety (no data corruption)
+  - [x] Minimal planner rule (acceptance): use a single-field index for simple equality/range predicates; otherwise full scan; tests assert planner chooses the index when available
+  - [x] Index metadata versioning: bump on index format changes; auto-rebuild indexes on version mismatch at startup (document behavior)
+
+- [ ] API/CLI/UX
+  - [ ] Full clap-based binary exposing Import/Export/Query commands and DB/collection admin
+  - [ ] Add CLI config file loader with precedence (flags > env > config files > defaults) (e.g., `nexuslite.toml` and `nexusliterc`) for default DB path, logging and user preferences.
+  - [ ] Config secrets hygiene: discourage storing secrets in config files; prefer environment variables; redact secret-like keys in logs and diagnostics
+  - [ ] Implement on-disk index metadata/versioning and rebuild UX
+  - [ ] Add `nexuslite info` command to print database stats, index metadata, and engine version
+  - [ ] Add `nexuslite doctor` CLI command to check DB health, file permissions, and config
+  - [ ] Add "info" API/FFI call to print engine/cache/index stats and other metrics that should be exposed
+  - [ ] Add `nexuslite shell` for interactive query/collection management (REPL)
+  - [ ] Implement testing framework for API/CLI/UX to ensure all features are covered
+
+- [ ] Cryptography (optional features)
+  - [ ] ECC-256 encryption (key/Pair) and ECDSA signature verification
+    - [ ] ECC-256 based encryption for database files.
+  - [ ] ECDSA signature verification for database files.
+  - [ ] Add CLI/API option to redact or mask sensitive fields in logs and exports.
+  - [ ] Implement support for `secret fields` (e.g., user-based passwords using `bcrypt`/`argon2`) that will salt and hash field values. These field values will not be queryable (no equality joins on hashed values)
+  - [ ] PQC roadmap alignment (ml-kem, sphincs+) as future work
+  - [ ] Add PQC code stub to the `crypto` module for future integration.
+
 - [ ] Code security and supply-chain
   - [ ] `cargo audit` + `cargo deny` in CI; fail on vulnerable/yanked deps
   - [ ] Clippy (pedantic + nursery) and rustfmt in CI; deny warnings
   - [ ] Forbid `unsafe` in crate (or gate behind feature if absolutely required)
   - [ ] Dependency pinning and minimal public surface review
+  - [ ] Implement a comprehensive security review process (e.g., threat modeling, attack surface analysis)
+
 - [ ] Fuzzing and property tests
   - [ ] `cargo fuzz` targets: filter parser, evaluator, update applier, CSV/NDJSON parsers
+  - [ ] Add minimal reproducible fuzzing corpus to the repo for quick local runs
   - [ ] `proptest`/`quickcheck` for evaluator invariants and sort stability
+
 - [ ] Memory and concurrency safety
   - [ ] Concurrency tests (basic loom model or stress tests) for lock ordering
   - [ ] Cursor-based iteration in core paths to avoid large clones
   - [ ] Optional sanitizer/miri runs in CI where feasible (nightly job)
+
 - [ ] File I/O safety
   - [ ] Use `tempfile::NamedTempFile` for atomic writes (avoid symlink races)
   - [ ] Path normalization and validation; explicit permissions where applicable
-  - [ ] Retry/backoff strategy around Windows file locks
+  - [ ] Retry/backoff strategy around Windows file locks, prefer short retries with jitter
+  - [ ] Embed DB format version and magic; refuse downgrade and log upgrade path
+
+- [ ] Additional Testing/CI
+  - [ ] Add mutation testing (e.g., with `mutagen` or `cargo-mutants`) to catch logic holes
+
 - [ ] Observability and abuse resistance
   - [ ] Structured query logs with redaction for sensitive fields
-  - [ ] Rate limiting and quotas hooks (per collection) for API/CLI future
+  - [ ] Rate limiting and quotas hooks (per collection) for API/CLI. (Future Work, Define minimal counters that will be exposed)
+  - [ ] Audit logging for all write operations (user, timestamp, changes) (Optional Feature)
+  - [ ] Query logging with user/session metadata (Optional Feature)
+  - [ ] Extra hardening (e.g., input validation, output encoding, regex timeouts)
   - [ ] Query timeouts and max result size enforcement
-- [ ] Performance/indexing
-  - [ ] Initial indexing strategies (exact-match and range on popular fields)
-  - [ ] Transaction support exploration (design doc)
-- [ ] CLI/UX
-  - [ ] Full clap-based binary exposing Import/Export/Query commands and DB/collection admin
-- [ ] Cryptography (optional features)
-  - [ ] ECC-256 encryption (key/Pair) and ECDSA signature verification
-  - [ ] PQC roadmap alignment (ml-kem, sphincs+) as future work
+  - [ ] Add Prometheus/OpenMetrics export (optional feature) for cache/engine/query stats
+  - [ ] Add slow query log (optional feature, configurable threshold)
+    - [ ] Slow query threshold (ms) configurable per-DB; log top N offenders
+    - [ ] Slow query log format stability: include fields {timestamp, db, collection, filter_hash, duration_ms, limit, skip}; treat names as stable for MVP
+  - [ ] Metrics naming stability: document metric names in docs and consider them stable for MVP
+
+- [ ] Feature flags
+  - [ ] Publish supported feature flags: `crypto-ecc`, `crypto-pqc` (future), `prometheus`, `regex`, `cli-bin`
+  - [ ] Document supported build combinations (MVP build matrix) and deny unknown features in CI
+  - [ ] Expose compiled feature flags in `db info` and document them in mdBook/Rustdoc
+
+- [ ] Docs
+  - [ ] Add a "Deployment" section with guidelines for deploying the application.
+  - [ ] Add a "Security Model" section to the documentation, outlining threat model, encryption and audit logging plans
+  - [ ] Add a "Performance Tuning" section with cache, eviction, and index tuning tips.
+  - [ ] Add a "Testing and QA" section with guidelines for writing tests and using CI tools.
+  - [ ] Add a section for Transaction support exploration in the `Project_Development.md` documentation.
+  - [ ] Add a section for compatibility policy and on-disk format versioning
+  - [ ] Create API/CLI documentation (e.g., Rustdoc/mdBook and available as optional feature flag) and auto-generated CLI help/manpage. Metric names should also be inside of the documentation
+  - [ ] Create a user guide (e.g., usage examples, tutorials).
+  - [ ] Update Developer Documentation (Project_Development.md).
+  - [ ] Update `README.md` documentation.
+
+---
+
+## Sprint 7: Benchmarks (Optional Feature)
+
+- [ ] Create the necessary hooks within the database engine to support benchmarking. Tests should include, but not be limited to:
+  - [ ] Query execution time tracking
+  - [ ] Index usage statistics
+  - [ ] Cache hit/miss ratios
+  - [ ] WASP performance metrics
+  - [ ] Document size and growth rate tracking
+  - [ ] Query result size tracking
+  - [ ] Cache eviction statistics
+  - [ ] Document read/write latency tracking
+  - [ ] Cache performance metrics
+  - [ ] WASP recovery time tracking
+  - [ ] Any other relevant metrics
+
+- [ ] Finalize repo for use as a Rust crate, including:
+  - [ ] Add `nexuslite` as a dependency in `Cargo.toml`.
+  - [ ] Ensure all public APIs are documented and tested.
+  - [ ] Ensure all features are properly gated with feature flags.
+  - [ ] Ensure the code is well-structured and follows Rust conventions.
+  - [ ] Ensure the code is well-tested and has good test coverage.
+  - [ ] Ensure the code is well-documented and has good documentation.
+
+- [ ] Create a "packages" folder for the repo that include packages for, but not limited to:
+  - [ ] Python
+  - [ ] JavaScript / TypeScript
+  - [ ] Go
+  - [ ] C and C++
+  - [ ] Rust
 
 ---
 
@@ -323,6 +448,9 @@ The following is the current project structure, subject to change:
 
 ```text
 nexus_lite
+├── benchmarks\
+│   ├── results\
+│   ├── benchmark_wasp.rs
 ├── src\
 │   ├── api.rs
 │   ├── cache.rs
@@ -334,8 +462,10 @@ nexus_lite
 │   ├── errors.rs
 │   ├── export.rs
 │   ├── import.rs
+│   ├── index.rs
 │   ├── lib.rs
 │   ├── logger.rs
+│   ├── query.rs
 │   ├── types.rs
 │   ├── wal.rs
 │   └── wasp.rs
@@ -344,6 +474,7 @@ nexus_lite
 │   │   └── test_logger.rs
 │   ├── integration.rs
 │   ├── mod_api.rs
+│   ├── mod_cache.rs
 │   ├── mod_cli.rs
 │   ├── mod_collection.rs
 │   ├── mod_crypto.rs
@@ -352,8 +483,9 @@ nexus_lite
 │   ├── mod_errors.rs
 │   ├── mod_export.rs
 │   ├── mod_import.rs
+│   ├── mod_index.rs
 │   ├── mod_lib.rs
-│   ├── mod_logger.rs
+│   ├── mod_queries.rs
 │   ├── mod_types.rs
 │   ├── mod_wal.rs
 │   └── mod_wasp.rs
@@ -488,7 +620,9 @@ nexus_lite
 
 - Purpose: User-facing database wrapper around Engine with ergonomic helpers.
 - Features:
-  - `Database::new()` and `Database::open(path)` for setup
+  - `Database::new(name_or_path: Option<&str>)` creates `.db` (defaulting to `.db` extension) and `.wasp` if missing
+  - `Database::open(name_or_path: Option<&str>)` opens existing `.db`, creating `.wasp` if missing; errors `Database Not Found` otherwise
+  - `Database::close(name_or_path: Option<&str>)` unregisters/"closes" an open DB handle
   - Collection management: create/get/delete, list names
   - Document helpers: insert/update/delete
   - `nexus_lite::init()` to initialize logging
@@ -509,7 +643,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   nexus_lite::init()?;
 
   // Create or open database (WASP-backed by default)
-  let db = Database::new()?;
+  // Use default name (nexuslite.db / nexuslite.wasp)
+  let db = Database::new(None)?;
 
   // Create a collection
   db.create_collection("users");

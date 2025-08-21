@@ -37,6 +37,13 @@ impl BloomFilter {
 use std::io::{self, SeekFrom, Read, Write, Seek};
 use std::path::PathBuf;
 use rand::Rng;
+use crate::types::Operation;
+use bincode::serde::{encode_to_vec, decode_from_slice};
+use bincode::config::standard;
+use std::fs::{File, OpenOptions};
+use serde::{Serialize, Deserialize};
+use crate::index::IndexDescriptor;
+use crate::index::IndexKind as IxKind;
 
 pub struct BlockCache {}
 impl BlockCache {
@@ -588,14 +595,9 @@ impl CowTree {
 }
 
 // === End Phase 1b ===
-use crate::types::Operation;
-use std::fs::{File, OpenOptions};
 /// Fuzz test: corrupts WAL/pages/manifest and checks recovery.
 use crc32fast::Hasher as Crc32Hasher;
 	// TODO: Implement corruption and recovery test
-use serde::{Serialize, Deserialize};
-use bincode::config::standard;
-use bincode::serde::{encode_to_vec, decode_from_slice};
 // === WASP Phase 1: Page Format, Manifest Write/Flip, Minimal CoW Tree Stubs ===
 
 // Page header (64 bytes):
@@ -809,6 +811,10 @@ impl Manifest {
 pub trait StorageEngine: Send + Sync {
 	fn append(&mut self, operation: &Operation) -> io::Result<()>;
 	fn read_all(&self) -> io::Result<Vec<Result<Operation, bincode::error::DecodeError>>>;
+	fn checkpoint_with_meta(&mut self, _db_path: &PathBuf, _indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> { Ok(()) }
+	fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+	fn append_index_delta(&mut self, _delta: IndexDelta) -> io::Result<()> { Ok(()) }
+	fn read_index_deltas(&self) -> io::Result<Vec<IndexDelta>> { Ok(vec![]) }
 }
 
 /// WASP: a buffered, hybrid crash-consistent storage engine.
@@ -831,7 +837,6 @@ impl Wasp {
 	/// Checkpoint: merge the WASP append log into the main database file.
 	/// This rewrites the database file with all operations applied, compacts the log, and updates the manifest.
 	pub fn checkpoint(&mut self, db_path: &PathBuf) -> io::Result<()> {
-		use std::fs::OpenOptions;
 		use std::io::{Seek, SeekFrom, Write, Read};
 		// 1. Read all operations from WASP log
 		self.file.flush()?;
@@ -859,7 +864,7 @@ impl Wasp {
 	let tmp_path = db_path.with_extension("db.tmp");
 	println!("[DEBUG] tmp_path: {:?}, db_path: {:?}", tmp_path, db_path);
 	std::io::stdout().flush().unwrap();
-	let mut db_file = OpenOptions::new().create(true).write(true).truncate(true).open(&tmp_path)?;
+		let mut db_file = OpenOptions::new().create(true).write(true).truncate(true).open(&tmp_path)?;
 
 		// 3. Apply all operations to the new file (serialize as needed)
 		// For simplicity, just serialize all operations as a vector
@@ -928,15 +933,74 @@ impl Wasp {
 		// 6. Update manifest if needed (not shown here, as manifest is in WASP file)
 		Ok(())
 	}
+
+	/// Checkpoint with index metadata: write a DbSnapshot containing operations and index descriptors.
+	pub fn checkpoint_with_meta(&mut self, db_path: &PathBuf, indexes: std::collections::HashMap<String, Vec<IndexDescriptor>>) -> io::Result<()> {
+		// 1. Read all operations from WASP log
+		self.file.flush()?;
+		self.file.seek(SeekFrom::Start(0))?;
+		let mut buffer = Vec::new();
+		self.file.read_to_end(&mut buffer)?;
+		let mut offset = 0usize;
+		let mut operations = Vec::new();
+		while offset + 8 <= buffer.len() {
+			let len_bytes = &buffer[offset..offset + 8];
+			let len = u64::from_be_bytes(len_bytes.try_into().unwrap()) as usize;
+			offset += 8;
+			if offset + len > buffer.len() { break; }
+			let encoded_op = &buffer[offset..offset + len];
+			if let Ok((op, _)) = decode_from_slice::<Operation, _>(encoded_op, standard()) { operations.push(op); }
+			offset += len;
+		}
+
+		let snapshot = DbSnapshot { version: 1, operations, indexes };
+		let tmp_path = db_path.with_extension("db.tmp");
+		let mut db_file = OpenOptions::new().create(true).write(true).truncate(true).open(&tmp_path)?;
+		let encoded = encode_to_vec(&snapshot, standard()).unwrap();
+		db_file.write_all(&encoded)?;
+		db_file.sync_data()?;
+		drop(db_file);
+
+		#[cfg(target_os = "windows")]
+		{
+			use std::os::windows::ffi::OsStrExt;
+			use std::ffi::OsStr;
+			use winapi::um::winbase::MOVEFILE_REPLACE_EXISTING;
+			use winapi::um::winbase::MoveFileExW;
+			fn to_wide(s: &std::path::Path) -> Vec<u16> { OsStr::new(s).encode_wide().chain(Some(0)).collect() }
+			let from = to_wide(&tmp_path);
+			let to = to_wide(db_path);
+			let result = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
+			if result == 0 { std::fs::rename(&tmp_path, db_path)?; }
+		}
+		#[cfg(not(target_os = "windows"))]
+		{
+			if db_path.exists() { let _ = std::fs::remove_file(db_path); }
+			rename(&tmp_path, db_path)?;
+		}
+
+		// Truncate WAL
+		self.file.set_len(0)?;
+		self.file.sync_data()?;
+		Ok(())
+	}
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbSnapshot {
+    pub version: u32,
+    pub operations: Vec<Operation>,
+    pub indexes: std::collections::HashMap<String, Vec<IndexDescriptor>>,
 }
 
 impl StorageEngine for Wasp {
 	fn append(&mut self, operation: &Operation) -> io::Result<()> {
-		let encoded = encode_to_vec(operation, standard())
-			.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-		// length-prefixed frame
-		self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
-		self.file.write_all(&encoded)?;
+	// Wrap as frame and encode
+	let frame = WaspFrame::Op(operation.clone());
+	let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+	// length-prefixed frame
+	self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
+	self.file.write_all(&encoded)?;
 		// Buffered write; flushing each append keeps semantics similar to WAL for now.
 		self.file.flush()
 	}
@@ -957,12 +1021,49 @@ impl StorageEngine for Wasp {
 				break;
 			}
 			let encoded_op = &buffer[offset..offset + len];
-			let operation = decode_from_slice::<Operation, _>(encoded_op, standard());
-			operations.push(operation.map(|(op, _)| op));
+			let frame = decode_from_slice::<WaspFrame, _>(encoded_op, standard());
+			match frame {
+				Ok((WaspFrame::Op(op), _)) => operations.push(Ok(op)),
+				Ok((_other, _)) => { /* ignore non-Op frames */ }
+				Err(e) => operations.push(Err(e)),
+			}
 			offset += len;
 		}
 
 		Ok(operations)
+	}
+
+	fn checkpoint_with_meta(&mut self, db_path: &PathBuf, indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> {
+		self.checkpoint_with_meta(db_path, indexes)
+	}
+
+	fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+
+	fn append_index_delta(&mut self, delta: IndexDelta) -> io::Result<()> {
+		let frame = WaspFrame::Idx(delta);
+		let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+		self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
+		self.file.write_all(&encoded)?;
+		self.file.flush()
+	}
+
+	fn read_index_deltas(&self) -> io::Result<Vec<IndexDelta>> {
+		let mut file = self.file.try_clone()?;
+		file.seek(io::SeekFrom::Start(0))?;
+		let mut buffer = Vec::new();
+		file.read_to_end(&mut buffer)?;
+		let mut out = Vec::new();
+		let mut offset = 0usize;
+		while offset + 8 <= buffer.len() {
+			let len_bytes = &buffer[offset..offset + 8];
+			let len = u64::from_be_bytes(len_bytes.try_into().unwrap()) as usize;
+			offset += 8;
+			if offset + len > buffer.len() { break; }
+			let encoded = &buffer[offset..offset + len];
+			if let Ok((WaspFrame::Idx(d), _)) = decode_from_slice::<WaspFrame, _>(encoded, standard()) { out.push(d); }
+			offset += len;
+		}
+		Ok(out)
 	}
 }
 
@@ -975,4 +1076,32 @@ impl StorageEngine for crate::wal::Wal {
 	fn read_all(&self) -> io::Result<Vec<Result<Operation, bincode::error::DecodeError>>> {
 		crate::wal::Wal::read_all(self)
 	}
+
+	fn checkpoint_with_meta(&mut self, _db_path: &PathBuf, _indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> {
+		Ok(())
+	}
+
+	fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DeltaOp { Add, Remove }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DeltaKey { Str(String), F64(f64), I64(i64), Bool(bool) }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexDelta {
+	pub collection: String,
+	pub field: String,
+	pub kind: IxKind,
+	pub op: DeltaOp,
+	pub key: DeltaKey,
+	pub id: crate::types::DocumentId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WaspFrame {
+	Op(Operation),
+	Idx(IndexDelta),
 }

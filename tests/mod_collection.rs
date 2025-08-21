@@ -6,6 +6,7 @@ use bson::doc;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::tempdir;
+use nexus_lite::index::IndexKind;
 
 #[tokio::test]
 async fn test_collection_new() {
@@ -69,4 +70,25 @@ async fn test_delete_document() {
     let deleted = collection.delete_document(&doc_id);
     assert!(deleted);
     assert!(collection.find_document(&doc_id).is_none());
+}
+
+#[tokio::test]
+async fn test_create_index_and_query_equality() {
+    let dir = tempdir().unwrap();
+    let wal_path = dir.path().join("wal.log");
+    let wal = Wal::new(wal_path).unwrap();
+    let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wal)));
+    let collection = Collection::new("test_index".to_string(), storage, 10_000);
+    for i in 0..100i32 {
+        let d = Document::new(doc! { "k": i, "v": format!("v{}", i) }, DocumentType::Persistent);
+        collection.insert_document(d);
+    }
+    collection.create_index("k", IndexKind::Hash);
+    let filter = nexus_lite::query::Filter::Cmp { path: "k".into(), op: nexus_lite::query::CmpOp::Eq, value: bson::Bson::Int32(42) };
+    let opts = nexus_lite::query::FindOptions::default();
+    let arc = Arc::new(collection);
+    let cur = nexus_lite::query::find_docs(&arc, &filter, &opts);
+    let docs = cur.to_vec();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].data.0.get_i32("k").unwrap(), 42);
 }

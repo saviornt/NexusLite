@@ -12,6 +12,14 @@ pub fn db_open(db_path: &str) -> Result<crate::Database, DbError> {
     crate::Database::open(db_path).map_err(|e| DbError::Io(e.to_string()))
 }
 
+pub fn db_new(db_path: Option<&str>) -> Result<crate::Database, DbError> {
+    crate::Database::new(db_path).map_err(|e| DbError::Io(e.to_string()))
+}
+
+pub fn db_close(db_path: Option<&str>) -> Result<(), DbError> {
+    crate::Database::close(db_path)
+}
+
 pub fn db_create_collection(db: &crate::Database, name: &str) {
     db.create_collection(name);
 }

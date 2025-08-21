@@ -13,6 +13,7 @@ pub mod logger;
 pub mod types;
 pub mod wal;
 pub mod wasp;
+pub mod index;
 
 use crate::collection::Collection;
 use crate::document::Document;
@@ -21,24 +22,25 @@ use crate::errors::DbError;
 use crate::types::DocumentId;
 use std::path::Path;
 use std::sync::Arc;
+use bincode::serde::decode_from_slice;
+use bincode::config::standard;
+use std::path::PathBuf;
+use std::collections::HashMap;
 
 /// The main database struct.
 pub struct Database {
     engine: Arc<Engine>,
+    name: String,
 }
 
 impl Database {
-    /// Creates a new in-memory database instance.
-    pub fn new() -> Result<Self, DbError> {
-    // Default on-disk files to align with API expectations
-    Self::open("nexuslite.db")
-    }
-
-    /// Opens or creates a database file and its associated WASP file.
-    ///
-    /// The main database is stored at `{filepath}` and the WASP engine state is stored at `{filepath}.wasp`.
-    pub fn open<P: AsRef<Path>>(filepath: P) -> Result<Self, DbError> {
-        let db_path = filepath.as_ref();
+    /// Create a database, optionally at the provided file path/name.
+    /// - If `name_or_path` is Some and non-empty, it is used (extension defaults to .db if missing).
+    /// - If None or empty, defaults to `nexuslite.db` in the current directory.
+    /// This ensures the main `.db` file exists and also creates the `.wasp` file if missing.
+    pub fn new(name_or_path: Option<&str>) -> Result<Self, DbError> {
+        let db_path_buf = normalize_db_path(name_or_path);
+        let db_path = db_path_buf.as_path();
         let wasp_path = db_path.with_extension("wasp");
 
         // Create the main database file if it doesn't exist
@@ -46,25 +48,91 @@ impl Database {
             std::fs::File::create(db_path)
                 .map_err(|e| DbError::Io(format!("Failed to create database file: {}", e)))?;
         }
-
         // Create the WASP file if it doesn't exist
         if !wasp_path.exists() {
             std::fs::File::create(&wasp_path)
                 .map_err(|e| DbError::Io(format!("Failed to create WASP file: {}", e)))?;
         }
 
-        // Initialize logging scoped to db name
+        // Initialize logging next to DB: {db_dir}/{db_stem}_logs/{db_stem}.log
         if let Some(stem) = db_path.file_stem().and_then(|s| s.to_str()) {
-            let _ = crate::logger::init_for_db(stem);
+            let base = db_path.parent().unwrap_or(std::path::Path::new("."));
+            let _ = crate::logger::init_for_db_in(base, stem);
         }
-        // Open the WASP engine using the .wasp file
+
         let engine = Engine::with_wasp(wasp_path)
             .map_err(|e| DbError::Io(e.to_string()))?;
 
-        Ok(Database {
-            engine: Arc::new(engine),
-        })
+        let engine_arc = Arc::new(engine);
+        crate::register_engine(&engine_arc);
+
+        // If a snapshot exists in the .db file, load index descriptors and ensure indexes exist
+        if let Ok(bytes) = std::fs::read(db_path) {
+            if let Ok((snap, _)) = decode_from_slice::<crate::wasp::DbSnapshot, _>(&bytes, standard()) {
+                for (cname, descs) in snap.indexes.iter() {
+                    let col = engine_arc.get_collection(cname).unwrap_or_else(|| engine_arc.create_collection(cname.clone()));
+                    for d in descs {
+                        col.create_index(&d.field, d.kind);
+                    }
+                }
+            }
+        }
+
+        let name = db_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("nexuslite")
+            .to_string();
+
+    let db = Database { engine: engine_arc.clone(), name };
+        // Register as opened
+        register_db(&db_path_buf, &engine_arc);
+        Ok(db)
     }
+
+    /// Open an existing database and ensure the associated `.wasp` file exists.
+    ///
+    /// The main database is stored at `{filepath}` and the WASP engine state at `{filepath}.wasp`.
+    /// If the main `.db` file does not exist, returns `DbError::DatabaseNotFound`.
+    /// If the DB file doesn't exist, returns DbError::DatabaseNotFound.
+    pub fn open(name_or_path: &str) -> Result<Self, DbError> {
+        let db_path_buf = normalize_db_path(Some(name_or_path));
+        let db_path = db_path_buf.as_path();
+        if !db_path.exists() { return Err(DbError::DatabaseNotFound); }
+        let wasp_path = db_path.with_extension("wasp");
+        // Create the WASP file if it doesn't exist
+        if !wasp_path.exists() {
+            std::fs::File::create(&wasp_path)
+                .map_err(|e| DbError::Io(format!("Failed to create WASP file: {}", e)))?;
+        }
+        // Initialize logging next to DB: {db_dir}/{db_stem}_logs/{db_stem}.log
+        if let Some(stem) = db_path.file_stem().and_then(|s| s.to_str()) {
+            let base = db_path.parent().unwrap_or(std::path::Path::new("."));
+            let _ = crate::logger::init_for_db_in(base, stem);
+        }
+        let engine = Engine::with_wasp(wasp_path)
+            .map_err(|e| DbError::Io(e.to_string()))?;
+        let engine_arc = Arc::new(engine);
+        crate::register_engine(&engine_arc);
+        if let Ok(bytes) = std::fs::read(db_path) {
+            if let Ok((snap, _)) = decode_from_slice::<crate::wasp::DbSnapshot, _>(&bytes, standard()) {
+                for (cname, descs) in snap.indexes.iter() {
+                    let col = engine_arc.get_collection(cname).unwrap_or_else(|| engine_arc.create_collection(cname.clone()));
+                    for d in descs { col.create_index(&d.field, d.kind); }
+                }
+            }
+        }
+        let name = db_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("nexuslite")
+            .to_string();
+    let db = Database { engine: engine_arc.clone(), name };
+        register_db(&db_path_buf, &engine_arc);
+        Ok(db)
+    }
+
+    // open_with_name removed: callers should pass the desired path; name derives from file stem.
 
     /// Creates a new collection with the given name.
     pub fn create_collection(&self, name: &str) -> Arc<Collection> {
@@ -142,6 +210,22 @@ impl Database {
         let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(crate::query::delete_one(&col, filter))
     }
+
+    /// Checkpoint: write a snapshot embedding index descriptors into the main .db file, then truncate .wasp
+    pub fn checkpoint(&self, filepath: &Path) -> Result<(), DbError> {
+        let db_path = filepath;
+        self.engine.checkpoint_with_indexes(&db_path.to_path_buf()).map_err(|e| DbError::Io(e.to_string()))
+    }
+
+    /// Returns the logical database name.
+    pub fn name(&self) -> &str { &self.name }
+
+    /// Closes an open database handle by path (optional). If not found, returns DatabaseNotFound.
+    /// This removes the handle from the internal registry; resources are dropped when no longer referenced.
+    pub fn close(name_or_path: Option<&str>) -> Result<(), DbError> {
+        let db_path = normalize_db_path(name_or_path);
+        if unregister_db(&db_path) { Ok(()) } else { Err(DbError::DatabaseNotFound) }
+    }
 }
 
 /// Initializes the database system.
@@ -151,4 +235,44 @@ impl Database {
 pub fn init() -> Result<(), Box<dyn std::error::Error>> {
     logger::init()?;
     Ok(())
+}
+
+use lazy_static::lazy_static;
+use parking_lot::RwLock;
+use std::sync::Weak;
+
+lazy_static! {
+    static ref ENGINE_WEAK: RwLock<Option<Weak<engine::Engine>>> = RwLock::new(None);
+    static ref DB_REGISTRY: RwLock<HashMap<String, Weak<engine::Engine>>> = RwLock::new(HashMap::new());
+}
+
+#[allow(dead_code)]
+pub fn register_engine(engine: &Arc<engine::Engine>) {
+    *ENGINE_WEAK.write() = Some(Arc::downgrade(engine));
+}
+
+#[allow(dead_code)]
+pub fn engine_save_indexes_metadata() -> Option<impl FnOnce()> {
+    let opt = ENGINE_WEAK.read().clone();
+    if let Some(w) = opt {
+        if let Some(e) = w.upgrade() { return Some(move || { let _ = e.save_indexes_metadata(); }); }
+    }
+    None
+}
+
+fn normalize_db_path(name_or_path: Option<&str>) -> PathBuf {
+    let raw = match name_or_path { Some(s) if !s.trim().is_empty() => PathBuf::from(s), _ => PathBuf::from("nexuslite") };
+    let pb = if raw.extension().is_none() { let mut p = raw; p.set_extension("db"); p } else { raw };
+    // Ensure relative paths are resolved from current dir for registry key stability
+    if pb.is_absolute() { pb } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(pb) }
+}
+
+fn register_db(path: &PathBuf, engine: &Arc<engine::Engine>) {
+    let key = path.to_string_lossy().to_string();
+    DB_REGISTRY.write().insert(key, Arc::downgrade(engine));
+}
+
+fn unregister_db(path: &PathBuf) -> bool {
+    let key = path.to_string_lossy().to_string();
+    DB_REGISTRY.write().remove(&key).is_some()
 }

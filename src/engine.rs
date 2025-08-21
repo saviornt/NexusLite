@@ -3,24 +3,31 @@ use crate::collection::Collection;
 use crate::document::DocumentType;
 use crate::wal::Wal;
 use crate::wasp::{StorageEngine, Wasp};
+use crate::index::{IndexDescriptor, INDEX_METADATA_VERSION, IndexKind};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::fs;
+use serde::{Serialize, Deserialize};
 
 const DEFAULT_CACHE_CAPACITY: usize = 1024;
 
 pub struct Engine {
     pub collections: RwLock<HashMap<String, Arc<Collection>>>,
     pub storage: Arc<RwLock<Box<dyn StorageEngine>>>,
+    metadata_path: PathBuf,
 }
 
 impl Engine {
     pub fn new(wal_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let wal = Wal::new(wal_path)?;
+        // Resolve and cache metadata path at engine creation to avoid env var races in tests
+        let metadata_path = if let Ok(p) = std::env::var("NEXUS_INDEX_META") { PathBuf::from(p) } else { PathBuf::from("nexus_indexes.json") };
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
             storage: Arc::new(RwLock::new(Box::new(wal))),
+            metadata_path,
         };
 
         // Create the hidden collection for temporary documents on startup.
@@ -45,7 +52,9 @@ impl Engine {
             }
         }
 
-        Ok(engine)
+    // Rebuild indexes from metadata if present
+    engine.load_indexes_metadata();
+    Ok(engine)
     }
 
     pub fn create_collection(&self, name: String) -> Arc<Collection> {
@@ -56,6 +65,8 @@ impl Engine {
             DEFAULT_CACHE_CAPACITY,
         ));
         collections.insert(name, collection.clone());
+    // Attempt to rebuild indexes for this collection if metadata exists
+    self.load_collection_indexes(&collection);
         collection
     }
 
@@ -100,10 +111,104 @@ impl Engine {
 impl Engine {
     /// Construct an Engine backed by the WASP storage engine.
     pub fn with_wasp(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let wasp = Wasp::new(path)?;
-        Ok(Self {
+    let wasp = Wasp::new(path)?;
+    // Resolve and cache metadata path at engine creation to avoid env var races in tests
+    let metadata_path = if let Ok(p) = std::env::var("NEXUS_INDEX_META") { PathBuf::from(p) } else { PathBuf::from("nexus_indexes.json") };
+        let engine = Self {
             collections: RwLock::new(HashMap::new()),
             storage: Arc::new(RwLock::new(Box::new(wasp))),
-        })
+        metadata_path,
+        };
+        // Rebuild indexes from metadata if present
+        engine.load_indexes_metadata();
+        Ok(engine)
     }
+}
+
+impl Engine {
+    fn indexes_meta_path(&self) -> PathBuf { self.metadata_path.clone() }
+
+    fn load_indexes_metadata(&self) {
+        let path = self.indexes_meta_path();
+        if let Ok(bytes) = fs::read(&path) {
+            if let Ok(mut meta) = serde_json::from_slice::<IndexesMetadata>(&bytes) {
+                for (col_name, descs) in meta.collections.clone() {
+                    let col = if let Some(c) = self.get_collection(&col_name) { c } else { self.create_collection(col_name.clone()) };
+                    for d in descs { col.create_index(&d.field, d.kind); }
+                }
+                if meta.version != INDEX_METADATA_VERSION {
+                    meta.version = INDEX_METADATA_VERSION;
+                    let _ = fs::write(&path, serde_json::to_vec_pretty(&meta).unwrap_or_default());
+                }
+            } else if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                // Fallback tolerant parse for legacy shapes
+                let mut collections: HashMap<String, Vec<IndexDescriptor>> = HashMap::new();
+                if let Some(map) = val.get("collections").and_then(|v| v.as_object()) {
+                    for (cname, arr) in map.iter() {
+                        if let Some(items) = arr.as_array() {
+                            let mut v = Vec::new();
+                            for it in items {
+                                let field = it.get("field").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                                let kind_str = it.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                                let kind = match kind_str {
+                                    "Hash" | "hash" => IndexKind::Hash,
+                                    "BTree" | "btree" | "Btree" => IndexKind::BTree,
+                                    _ => IndexKind::Hash,
+                                };
+                                v.push(IndexDescriptor { field, kind });
+                            }
+                            collections.insert(cname.clone(), v);
+                        }
+                    }
+                }
+                for (col_name, descs) in collections.clone() {
+                    let col = if let Some(c) = self.get_collection(&col_name) { c } else { self.create_collection(col_name.clone()) };
+                    for d in descs { col.create_index(&d.field, d.kind); }
+                }
+                let meta = IndexesMetadata { version: INDEX_METADATA_VERSION, collections };
+                let _ = fs::write(&path, serde_json::to_vec_pretty(&meta).unwrap_or_default());
+            }
+        }
+    }
+
+    pub fn save_indexes_metadata(&self) -> std::io::Result<()> {
+        let mut collections_meta: HashMap<String, Vec<IndexDescriptor>> = HashMap::new();
+        for (name, col) in self.collections.read().iter() {
+            let mgr = col.indexes.read();
+            collections_meta.insert(name.clone(), mgr.descriptors());
+        }
+        let meta = IndexesMetadata { version: INDEX_METADATA_VERSION, collections: collections_meta };
+        fs::write(self.indexes_meta_path(), serde_json::to_vec_pretty(&meta).unwrap_or_default())
+    }
+
+    fn load_collection_indexes(&self, col: &Arc<Collection>) {
+        let path = self.indexes_meta_path();
+        if let Ok(bytes) = fs::read(&path) {
+            if let Ok(meta) = serde_json::from_slice::<IndexesMetadata>(&bytes) {
+                if meta.version != INDEX_METADATA_VERSION { return; }
+                let name = col.name_str();
+                if let Some(descs) = meta.collections.get(&name) {
+                    for d in descs { col.create_index(&d.field, d.kind); }
+                }
+            }
+        }
+    }
+
+    /// Persist a checkpoint of data and index metadata into the main DB file when using WASP.
+    pub fn checkpoint_with_indexes(&self, db_path: &PathBuf) -> std::io::Result<()> {
+        // Collect index descriptors per collection
+        let mut map: HashMap<String, Vec<IndexDescriptor>> = HashMap::new();
+        for (name, col) in self.collections.read().iter() {
+            let mgr = col.indexes.read();
+            map.insert(name.clone(), mgr.descriptors());
+        }
+        // Delegate to storage engine
+        self.storage.write().checkpoint_with_meta(db_path, map)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct IndexesMetadata {
+    version: u32,
+    collections: HashMap<String, Vec<IndexDescriptor>>,
 }

@@ -1,10 +1,12 @@
 use crate::collection::Collection;
+use crate::index;
 use crate::document::Document;
 use crate::types::DocumentId;
 use bson::{Bson, Document as BsonDocument};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::sync::Arc;
+use crate::wasp::{DeltaKey, DeltaOp};
 
 // Safety limits to prevent resource abuse
 const MAX_PATH_DEPTH: usize = 32;
@@ -240,7 +242,13 @@ pub fn delete_one(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
 
 pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> Cursor {
     let deadline = opts.timeout_ms.map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms));
-    let mut docs: Vec<Document> = col.get_all_documents();
+    // Planner: try to use a single-field index for simple equality/range, else full scan
+    let mut docs: Vec<Document> = if let Some(cands) = plan_index_candidates(col, filter) {
+        // Materialize candidate docs
+        cands.into_iter().filter_map(|id| col.find_document(&id)).collect()
+    } else {
+        col.get_all_documents()
+    };
     docs.retain(|d| {
         if let Some(dl) = deadline { if std::time::Instant::now() > dl { return false; } }
         eval_filter(&d.data.0, filter)
@@ -266,8 +274,119 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
     Cursor { collection: col.clone(), ids, pos: 0 }
 }
 
+fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<DocumentId>> {
+    match filter {
+        Filter::Cmp { path, op, value } => {
+            let mut mgr = col.indexes.write();
+            let mut base = match op {
+                CmpOp::Eq => index::lookup_eq(&mut mgr, path, value),
+                CmpOp::Gt => index::lookup_range(&mut mgr, path, Some(value), None, false, false),
+                CmpOp::Gte => index::lookup_range(&mut mgr, path, Some(value), None, true, false),
+                CmpOp::Lt => index::lookup_range(&mut mgr, path, None, Some(value), false, false),
+                CmpOp::Lte => index::lookup_range(&mut mgr, path, None, Some(value), false, true),
+            };
+
+            // Merge overlay deltas from WASP for this collection/field
+            let deltas = col.index_deltas();
+            if deltas.is_empty() { return base; }
+            use std::collections::HashSet;
+            let mut set: HashSet<DocumentId> = base.take().unwrap_or_default().into_iter().collect();
+            let col_name = col.name_str();
+            match op {
+                CmpOp::Eq => {
+                    let key_opt = delta_key_from_bson(value);
+                    for d in deltas.iter() {
+                        if d.collection == col_name && d.field == *path {
+                            if let Some(k) = key_opt.as_ref() {
+                                if delta_key_eq(d.key.clone(), k) {
+                                    match d.op { DeltaOp::Add => { set.insert(d.id.clone()); }, DeltaOp::Remove => { set.remove(&d.id); } }
+                                }
+                            }
+                        }
+                    }
+                }
+                CmpOp::Gt | CmpOp::Gte | CmpOp::Lt | CmpOp::Lte => {
+                    let (min, max, incl_min, incl_max) = match op {
+                        CmpOp::Gt => (Some(value), None, false, false),
+                        CmpOp::Gte => (Some(value), None, true, false),
+                        CmpOp::Lt => (None, Some(value), false, false),
+                        CmpOp::Lte => (None, Some(value), false, true),
+                        _ => (None, None, false, false),
+                    };
+                    for d in deltas.iter() {
+                        if d.collection == col_name && d.field == *path {
+                            if delta_key_in_range(&d.key, min, max, incl_min, incl_max) {
+                                match d.op { DeltaOp::Add => { set.insert(d.id.clone()); }, DeltaOp::Remove => { set.remove(&d.id); } }
+                            }
+                        }
+                    }
+                }
+            }
+            Some(set.into_iter().collect())
+        }
+        _ => None,
+    }
+}
+
+fn delta_key_from_bson(v: &Bson) -> Option<DeltaKey> {
+    match v {
+        Bson::String(s) => Some(DeltaKey::Str(s.clone())),
+        Bson::Int32(i) => Some(DeltaKey::I64(*i as i64)),
+        Bson::Int64(i) => Some(DeltaKey::I64(*i)),
+        Bson::Double(f) => Some(DeltaKey::F64(*f)),
+        Bson::Boolean(b) => Some(DeltaKey::Bool(*b)),
+        _ => None,
+    }
+}
+
+fn delta_key_eq(a: DeltaKey, b: &DeltaKey) -> bool {
+    use DeltaKey as DK;
+    match (a, b) {
+        (DK::Str(x), DK::Str(y)) => x == *y,
+        (DK::Bool(x), DK::Bool(y)) => x == *y,
+        (DK::I64(x), DK::I64(y)) => x == *y,
+        (DK::F64(x), DK::F64(y)) => x == *y,
+        (DK::I64(x), DK::F64(y)) => (x as f64) == *y,
+        (DK::F64(x), DK::I64(y)) => x == (*y as f64),
+        _ => false,
+    }
+}
+
+fn delta_key_cmp_val(a: &DeltaKey, v: &Bson) -> Option<Ordering> {
+    use DeltaKey as DK;
+    match (a, v) {
+        (DK::Str(x), Bson::String(y)) => Some(x.cmp(y)),
+        (DK::Bool(x), Bson::Boolean(y)) => Some(x.cmp(y)),
+    (DK::I64(x), Bson::Int32(y)) => Some((*x as i64).cmp(&(*y as i64))),
+        (DK::I64(x), Bson::Int64(y)) => Some(x.cmp(y)),
+        (DK::I64(x), Bson::Double(y)) => (*x as f64).partial_cmp(y),
+        (DK::F64(x), Bson::Double(y)) => x.partial_cmp(y),
+        (DK::F64(x), Bson::Int32(y)) => x.partial_cmp(&(*y as f64)),
+        (DK::F64(x), Bson::Int64(y)) => x.partial_cmp(&(*y as f64)),
+        _ => None,
+    }
+}
+
+fn delta_key_in_range(key: &DeltaKey, min: Option<&Bson>, max: Option<&Bson>, incl_min: bool, incl_max: bool) -> bool {
+    if let Some(minv) = min {
+        if let Some(ord) = delta_key_cmp_val(key, minv) {
+            if ord == Ordering::Less || (!incl_min && ord == Ordering::Equal) { return false; }
+        } else { return false; }
+    }
+    if let Some(maxv) = max {
+        if let Some(ord) = delta_key_cmp_val(key, maxv) {
+            if ord == Ordering::Greater || (!incl_max && ord == Ordering::Equal) { return false; }
+        } else { return false; }
+    }
+    true
+}
+
 pub fn count_docs(col: &Arc<Collection>, filter: &Filter) -> usize {
-    col.get_all_documents().into_iter().filter(|d| eval_filter(&d.data.0, filter)).count()
+    if let Some(cands) = plan_index_candidates(col, filter) {
+        cands.into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count()
+    } else {
+        col.get_all_documents().into_iter().filter(|d| eval_filter(&d.data.0, filter)).count()
+    }
 }
 
 pub fn eval_filter(doc: &BsonDocument, f: &Filter) -> bool {

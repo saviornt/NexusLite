@@ -3,11 +3,14 @@ use nexus_lite::{
     Database,
 };
 use bson::doc;
+use tempfile::tempdir;
 
 #[tokio::test]
 async fn test_database_operations() {
-    // 1. Create a new database
-    let db = Database::new().unwrap();
+    // 1. Create a new database in a temp directory
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("libtest.db");
+    let db = Database::new(db_path.to_str()).unwrap();
 
     // 2. Create a collection
     let collection_name = "users";
