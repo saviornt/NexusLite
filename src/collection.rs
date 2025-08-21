@@ -6,7 +6,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 pub struct Collection {
-    pub name: String,
+    pub name: Arc<RwLock<String>>,
     pub cache: Cache,
     storage: Arc<RwLock<Box<dyn StorageEngine>>>,
 }
@@ -14,17 +14,17 @@ pub struct Collection {
 impl Collection {
     pub fn new(name: String, storage: Arc<RwLock<Box<dyn StorageEngine>>>, cache_capacity: usize) -> Self {
         Collection {
-            name,
+            name: Arc::new(RwLock::new(name)),
             cache: Cache::new(cache_capacity),
-        storage,
+            storage,
         }
     }
 
     pub fn new_with_config(name: String, storage: Arc<RwLock<Box<dyn StorageEngine>>>, config: crate::cache::CacheConfig) -> Self {
         Collection {
-            name,
+            name: Arc::new(RwLock::new(name)),
             cache: Cache::new_with_config(config),
-        storage,
+            storage,
         }
     }
 
@@ -76,5 +76,14 @@ impl Collection {
 
     pub fn cache_metrics(&self) -> crate::cache::CacheMetricsSnapshot {
         self.cache.metrics_snapshot()
+    }
+
+    pub fn set_name(&self, new_name: String) {
+        *self.name.write() = new_name;
+    }
+
+    /// Returns the collection's name as a String (cloned), hiding the RwLock.
+    pub fn name_str(&self) -> String {
+        self.name.read().clone()
     }
 }

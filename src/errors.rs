@@ -43,4 +43,7 @@ pub enum DbError {
 
     #[error("Signature verification error: {0}")]
     SignatureVerificationError(String),
+
+    #[error("Query error: {0}")]
+    QueryError(String),
 }

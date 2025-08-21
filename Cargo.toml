@@ -29,6 +29,11 @@ tokio = { version = "1.47.1", features = ["full"] }
 uuid = { version = "1.18.0", features = ["serde", "v4"] }
 winapi = { version = "0.3.9", features = ["winbase"] }
 rand = "0.9.2"
+regex = { version = "1.10.6", optional = true }
 
 [dev-dependencies]
 tempfile = "3.20.0"
+
+[features]
+default = []
+regex = ["dep:regex"]

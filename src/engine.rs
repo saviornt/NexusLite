@@ -81,6 +81,20 @@ impl Engine {
     pub fn list_collection_names(&self) -> Vec<String> {
         self.collections.read().keys().cloned().collect()
     }
+
+    pub fn rename_collection(&self, old: &str, new: &str) -> Result<(), crate::errors::DbError> {
+        let mut map = self.collections.write();
+        if !map.contains_key(old) {
+            return Err(crate::errors::DbError::NoSuchCollection(old.to_string()));
+        }
+        if map.contains_key(new) {
+            return Err(crate::errors::DbError::CollectionAlreadyExists(new.to_string()));
+        }
+    let col = map.remove(old).expect("checked above");
+    col.set_name(new.to_string());
+    map.insert(new.to_string(), col);
+        Ok(())
+    }
 }
 
 impl Engine {

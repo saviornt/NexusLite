@@ -1,6 +1,6 @@
-# Nexus Lite - Project Development Roadmap
+# NexusLite - Project Development Roadmap
 
-Nexus-Lite is an embedded **NoSQL database engine**, inspired by the best features of **MongoDB** (document collections) and **Redis** (in-memory performance, TTL, and LRU caching). The goal is to provide a **lightweight, embeddable, efficient, and flexible** database engine similar to SQLite but for NoSQL workloads.
+NexusLite is an embedded **NoSQL database engine**, inspired by the best features of **MongoDB** (document collections) and **Redis** (in-memory performance, TTL, and LRU caching). The goal is to provide a **lightweight, embeddable, efficient, and flexible** database engine similar to SQLite but for NoSQL workloads.
 
 ---
 
@@ -150,7 +150,7 @@ Future features will always build on stable, well-tested foundations.
   - At a minimum, the importer should support CSV, JSON, BSON and Pandas DataFrame formats.
 - [x] Implement export features to export to various data formats.
 - [x] Perform tests and then troubleshoot and fix any issues.
-- [ ] Update Developer Documentation (Project_Development.md).
+- [x] Update Developer Documentation (Project_Development.md).
 
 #### Detailed checklist for Sprint 4
 
@@ -188,27 +188,95 @@ Future features will always build on stable, well-tested foundations.
   - [x] Update Project_Development.md with Sprint 4 completion
   - [x] README examples and pandas notes (NDJSON: `lines=True`)
 
-### Sprint 5 - Querying & APIs
+### Sprint 5 - Query Engine, CLI & APIs
 
-- [ ] Query engine (`find_documents_by_field`, operators `$gt`, `$lt`, `$in`, etc.).
-- [ ] Update operators (`$set`, `$inc`, `$unset`).
-- [ ] Create REST/gRPC API for external usage.
-- [ ] Developer-friendly Rust API bindings.
-- [ ] Deployment tooling (CLI & embedded support).
-- [ ] Perform tests and then troubleshoot and fix any issues.
-- [ ] Update Developer Documentation (Project_Development.md).
-- [ ] Update `README.md` documentation.
+- [x] Core query engine with typed filters (no string-eval; injection-safe)
+- [x] Public Rust APIs: find, count, update_many, delete_many, update_one, delete_one, cursor
+- [x] Update operators: `$set`, `$inc`, `$unset` (validated and type-safe)
+- [x] Projection, sort, pagination (limit/skip) and stable multi-key sort
+- [x] CLI commands: find, count, update, delete (streaming NDJSON/CSV output)
+  - Added single-document variants: update_one, delete_one
+- [x] Baseline security: input validation, limits, lock-scoping
+- [x] Tests: unit + integration
+- [x] Documentation updates (Project_Development.md, README.md)
 
-### Sprint 6 - Optimization, Extensions, Additional Features
+#### Detailed checklist for Sprint 5
 
-- [ ] Indexing strategies.
-- [ ] Transaction support.
-- [ ] Full clap-based binary UX for CLI integration.
-- [ ] Implement Key/Pair based encryption and decryption using ECC-256 bit encryption.
-- [ ] Implement signature verification using ECDSA.
-- [ ] Perform tests and then troubleshoot and fix any issues.
-- [ ] Update Developer Documentation (Project_Development.md).
-- [ ] Update `README.md` documentation.
+- [x] Filter DSL and evaluation
+  - [x] BSON/JSON filter structure with operators: `$eq`(implicit), `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$and`, `$or`, `$not`, `$exists`
+  - [x] Dot-notation field paths for nested documents (e.g., `profile.name.first`)
+  - [x] Type coercion for numerics (i32/i64/f64) with strict cross-type rules
+  - [x] Clear distinction between missing and null; `$exists` semantics
+- [x] Public APIs
+  - [x] `find(&self, filter: &Filter, opts: &FindOptions) -> Cursor`
+  - [x] `count(&self, filter: &Filter) -> usize`
+  - [x] `update_many(&self, filter: &Filter, update: &UpdateDoc) -> UpdateReport`
+  - [x] `delete_many(&self, filter: &Filter) -> DeleteReport`
+  - [x] `Cursor`: iterator over IDs; resolves documents lazily; test-only `to_vec()`
+  - [x] `FindOptions { projection, sort, limit, skip }` with `SortSpec { field, order }`
+- [x] Update operators
+  - [x] `$set`: assign/create nested field paths
+  - [x] `$inc`: numeric add; error on non-numeric targets
+  - [x] `$unset`: remove field if present
+  - [x] `UpdateReport { matched, modified }` (modified only on value change)
+- [x] Sort, projection, pagination
+  - [x] Stable comparator with multi-key sort; deterministic total order
+  - [x] Include-only projection by field paths
+  - [x] Enforce reasonable `limit`/`skip` bounds
+- [x] CLI (programmatic for now)
+  - [x] `query find --collection C --filter JSON --project 'a,b' --sort '-age,+name' --limit N --skip M --output (ndjson|csv|bson)`
+  - [x] `query count --collection C --filter JSON`
+  - [x] `query update --collection C --filter JSON --update JSON`
+  - [x] `query delete --collection C --filter JSON --confirm`
+  - [x] Stream results as NDJSON by default; CSV optional (headers)
+- [x] Security and safety
+  - [x] Parse filter/update via serde into typed structs (no string interpolation)
+  - [x] Enforce limits: max filter depth, max array length, max `$in` list size
+  - [x] Optional `$regex` behind feature flag with length guard (<= 512 chars)
+  - [x] Query timeout/cancellation hooks (best-effort deadline during scan)
+  - [x] Avoid panics; return structured errors; property tests for evaluator
+  - [x] Lock scoping: hold RwLocks minimally; snapshot IDs before iteration
+  - [x] Memory: prefer iterators; avoid cloning full collections
+- [x] Testing
+  - [x] Unit: operators, nested paths, numeric coercion, exists/missing, projection
+  - [x] Sort comparator correctness (multi-key, missing/null ordering)
+  - [x] Update operators: set/inc/unset; matched vs modified
+  - [x] Integration: import sample → queries → updates → exports
+  - [x] CLI: parse/execute filters/updates; stream output fixtures
+- [ ] Documentation
+  - [x] README: add “Query & Update” examples (Rust + CLI)
+  - [x] Project_Development.md: finalize Sprint 5 spec and checklists
+
+### Sprint 6 - Optimization, Security Hardening, Additional Features
+
+- [ ] Code security and supply-chain
+  - [ ] `cargo audit` + `cargo deny` in CI; fail on vulnerable/yanked deps
+  - [ ] Clippy (pedantic + nursery) and rustfmt in CI; deny warnings
+  - [ ] Forbid `unsafe` in crate (or gate behind feature if absolutely required)
+  - [ ] Dependency pinning and minimal public surface review
+- [ ] Fuzzing and property tests
+  - [ ] `cargo fuzz` targets: filter parser, evaluator, update applier, CSV/NDJSON parsers
+  - [ ] `proptest`/`quickcheck` for evaluator invariants and sort stability
+- [ ] Memory and concurrency safety
+  - [ ] Concurrency tests (basic loom model or stress tests) for lock ordering
+  - [ ] Cursor-based iteration in core paths to avoid large clones
+  - [ ] Optional sanitizer/miri runs in CI where feasible (nightly job)
+- [ ] File I/O safety
+  - [ ] Use `tempfile::NamedTempFile` for atomic writes (avoid symlink races)
+  - [ ] Path normalization and validation; explicit permissions where applicable
+  - [ ] Retry/backoff strategy around Windows file locks
+- [ ] Observability and abuse resistance
+  - [ ] Structured query logs with redaction for sensitive fields
+  - [ ] Rate limiting and quotas hooks (per collection) for API/CLI future
+  - [ ] Query timeouts and max result size enforcement
+- [ ] Performance/indexing
+  - [ ] Initial indexing strategies (exact-match and range on popular fields)
+  - [ ] Transaction support exploration (design doc)
+- [ ] CLI/UX
+  - [ ] Full clap-based binary exposing Import/Export/Query commands and DB/collection admin
+- [ ] Cryptography (optional features)
+  - [ ] ECC-256 encryption (key/Pair) and ECDSA signature verification
+  - [ ] PQC roadmap alignment (ml-kem, sphincs+) as future work
 
 ---
 
@@ -231,6 +299,7 @@ Future features will always build on stable, well-tested foundations.
   - Add encryption at rest (per-page or per-segment keys).
   - Implement online backup/checkpointing.
   - Consider pluggable compression for segments.
+- Dynamic Library layer using C-ABI externs.
 
 ---
 
@@ -363,7 +432,7 @@ nexus_lite
 
 - Purpose: Orchestrates collections and persistence backends.
 - Features:
-  - Create/get/delete collections; list collection names
+  - Create/get/delete collections; list collection names; rename collections
   - Pluggable storage: WAL or WASP (default via Engine::with_wasp)
   - Hidden `_tempDocuments` collection for ephemeral docs
   - On startup, loads ephemeral docs into cache when applicable
@@ -401,14 +470,18 @@ nexus_lite
 - Purpose: Provides a Rust API abstraction for embedding into apps.
 - Features:
   - Convenience helpers around core engine operations
+  - Query helpers: find/count, update/delete (many + one)
+  - Import/Export helpers
+  - DB/Collection management (FFI-friendly): open DB, create/list/delete/rename collections
   - Stable surface for embedding while internals evolve
 
 ### CLI Module: cli.rs
 
 - Purpose: Provides CLI support for developers and database administration.
 - Features:
-  - Command enum with Import/Export operations
-  - Simple format parsers and option mapping
+  - Import/Export commands
+  - Collection admin: create/delete/list/rename
+  - Query commands: find/count/update/delete (+ update_one/delete_one)
   - Programmatic entrypoint `cli::run(engine, cmd)` returning reports
 
 ### Database Module: lib.rs
@@ -423,6 +496,8 @@ nexus_lite
 ---
 
 ## Example Usage
+
+### Quick Start Usage
 
 ```rust
 use bson::doc;
@@ -460,7 +535,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ---
 
-## Import & Export Usage Examples
+### Import & Export Usage Examples
 
 Programmatic usage:
 

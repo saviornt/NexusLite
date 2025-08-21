@@ -24,6 +24,7 @@ impl Default for ExportOptions {
 pub struct ExportReport { pub written: u64 }
 
 pub fn export_file(engine: &Engine, collection: &str, path: impl AsRef<Path>, opts: &ExportOptions) -> io::Result<ExportReport> {
+    log::info!("export: collection={}, path={}", collection, path.as_ref().display());
     let p = path.as_ref();
     let tmp = tmp_path(p, &opts.temp_suffix);
     let report = export_to_writer(engine, collection, &tmp, opts)?;
@@ -47,6 +48,7 @@ pub fn export_to_writer(engine: &Engine, collection: &str, path: impl AsRef<Path
     let mut report = ExportReport::default();
     match opts.format {
         ExportFormat::Ndjson => {
+            log::debug!("export ndjson start");
             for d in col.get_all_documents() {
                 let v = bson::to_bson(&d.data.0).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 let s = serde_json::to_string(&v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

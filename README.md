@@ -1,83 +1,97 @@
-# Nexus Lite - Project Development Roadmap
+# NexusLite
 
-Nexus-Lite is an embedded **NoSQL database engine**, inspired by the best features of **MongoDB** (document collections) and **Redis** (in-memory performance, TTL, and LRU caching). The goal is to provide a **lightweight, embeddable, efficient, and flexible** database engine similar to SQLite but for NoSQL workloads.
+NexusLite is an embedded NoSQL database engine inspired by MongoDB (document collections) and Redis (in-memory performance, TTL, LRU). It aims to be a lightweight, embeddable, efficient, and flexible database—akin to SQLite, but for NoSQL workloads. The default storage engine is WASP (Write-Ahead Shadow-Paging).
 
----
+## Features
 
-[Watch NotebookLM's Overview on Youtube](https://www.youtube.com/watch?v=6RnNEfNk_G4)
+- Document collections with UUID-backed documents and rich metadata (timestamps, TTL)
+- Hybrid cache with TTL-first and LRU eviction, metrics, and background sweeper
+- Streaming import/export for NDJSON/CSV/BSON with auto-detect and error sidecar
+- Pluggable storage backends: WASP (default) and WAL (for benchmarking)
+- Crash consistency with checksums and atomic file operations (Windows-safe)
+- Simple, thread-safe API with parking_lot::RwLock
 
----
+### Quick start
 
-## AGILE Project Roadmap
+Basic database operations using the default WASP-backed storage:
 
-We’ll follow an **iterative AGILE approach** where each sprint adds working, testable functionality.  
-Future features will always build on stable, well-tested foundations.
+```rust
+use bson::doc;
+use nexus_lite::document::{Document, DocumentType};
+use nexus_lite::Database;
 
-**Notes:**
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  // Open or create a database (auto-creates mydb.db and mydb.wasp)
+  let db = Database::open("mydb.db")?;
 
-- Design with concurrency in mind using `RwLock` from the start as well as handling and logging errors.
-- Design with async in mind using `tokio` for both network and file-based async I/O.
+  // Create a collection and insert a document
+  db.create_collection("users");
+  let id = db.insert_document(
+    "users",
+    Document::new(doc!({"username": "alice", "age": 30}), DocumentType::Persistent),
+  )?;
 
-### Sprint 1 - Core In-Memory Engine
+  // Read it back
+  let users = db.get_collection("users").unwrap();
+  println!("Found: {:?}", users.find_document(&id));
+  Ok(())
+}
+```
 
-- [x] Developer Documentation (Project_Development.md).
-- [x] Implement error handling and logging using `log` and `log4rs`.
-- [x] Implement `Document` module (`document.rs`)
-  - Create, find, update, delete BSON-like documents.
-  - Assign UUID v4 on creation; store document metadata (timestamps, TTL for ephemeral docs).
-- [x] Implement `Collection` module (`collection.rs`)
-  - Manage sets of documents inside named collections (with `_tempDocuments` hidden collection).
-  - Maintain an index of document UUIDs.
-- [x] Implement `Engine` module (`engine.rs`)
-  - Manage multiple collections; file-backed via pluggable storage.
-- [x] Implement Rust API calls to database engine (`lib.rs`).
-- [x] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
-- [x] Generate Rust documentation (RustDoc) using `cargo doc`.
-- [x] Perform tests and then troubleshoot and fix any issues.
-- [x] Update Developer Documentation (Project_Development.md).
+Import/Export with the WASP engine directly:
 
-### Sprint 2 - Cache Layer (Redis-inspired)
+```rust
+use nexus_lite::engine::Engine;
+use nexus_lite::import::{import_file, ImportOptions, ImportFormat};
+use nexus_lite::export::{export_file, ExportOptions, ExportFormat};
 
-- [x] Implement Hybrid TTL-first + LRU eviction policy with runtime tuning.
-- [x] Metrics (hits/misses, eviction counts, memory/latency stats).
-- [x] Background sweeper and lazy expiration on access.
-- [x] Deterministic purge trigger for tests.
-- [x] Tests and documentation updates.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let engine = Engine::with_wasp(std::path::PathBuf::from("mydb.wasp"))?;
 
-### Sprint 3 - Persistence
+  // Import NDJSON (auto-detect)
+  let mut iopts = ImportOptions::default();
+  iopts.collection = "users".into();
+  iopts.format = ImportFormat::Auto;
+  let _ = import_file(&engine, "data/users.jsonl", &iopts)?;
 
-- [x] Implement WASP (Write-Ahead Shadow-Paging) storage engine and make it default.
-- [x] Pluggable storage: WAL vs WASP for benchmarking.
-- [x] Tiny WAL layer + recovery; manifest pointer flip; CoW pages.
-- [x] Immutable segments with bloom filters; compaction & GC.
-- [x] Concurrency & MVCC snapshot basics; checksums; torn-write protection.
-- [x] Benchmarks and tests; docs updated.
+  // Export as CSV
+  let mut eopts = ExportOptions::default();
+  eopts.format = ExportFormat::Csv;
+  let _ = export_file(&engine, "users", "export/users.csv", &eopts)?;
+  Ok(())
+}
+```
 
-### Sprint 4 - Import & Export Features
+Logging
 
-- [x] Import CSV/NDJSON/BSON with auto-detect, streaming, TTL mapping.
-- [x] Export CSV/NDJSON/BSON with Windows-safe atomic replace.
-- [x] CLI (programmatic) for import/export; tests.
-- [x] Documentation refresh (README examples, pandas notes).
+- Database-scoped logs are written automatically to a folder named after the DB stem, e.g., for mydb.db logs go to `mydb_logs/nexuslite.log`.
+  You don’t need to call a global logger init; it’s handled during `Database::open`.
 
-### Sprint 5 - Querying & APIs
+## WASP storage engine (default)
 
-- [ ] Query engine (`find_documents_by_field`, operators `$gt`, `$lt`, `$in`, etc.).
-- [ ] Update operators (`$set`, `$inc`, `$unset`).
-- [ ] Create REST/gRPC API for external usage.
-- [ ] Developer-friendly Rust API bindings.
-- [ ] Perform tests and then troubleshoot and fix any issues.
-- [ ] Update Developer Documentation (Project_Development.md).
+WASP (Write-Ahead Shadow-Paging) is a crash-consistent storage engine designed for embedded use:
 
-### Sprint 6 - Optimization, Extensions, Additional Features
+- Copy-on-write page tree with checksums
+- Double-buffered manifest with atomic pointer flips
+- Tiny WAL integration for ordered durability
+- Immutable segment store with bloom filters
+- Background compaction and space reclamation
+- Snapshot/MVCC-friendly read path
 
-- [ ] Indexing strategies.
-- [ ] Transaction support.
-- [ ] Deployment tooling (CLI & embedded support).
-- [ ] Implement Key/Pair based encryption and decryption using ECC-256 bit encryption.
-- [ ] Implement signature verification using ECDSA.
-- [ ] Perform tests and then troubleshoot and fix any issues.
-- [ ] Update Developer Documentation (Project_Development.md).
+## Build and test
+
+Using Cargo:
+
+```powershell
+cargo build
+cargo test --all --all-features -- --nocapture
+```
+
+To enable optional regex support in queries, build with the feature flag:
+
+```powershell
+cargo test --features regex -- --nocapture
+```
 
 ---
 
@@ -87,7 +101,7 @@ Future features will always build on stable, well-tested foundations.
 flowchart TD
     A[User Data <br> <i>JSON Formatted</i>] --> C[Cache <br> <i>cache.rs</i>]
     B[Imported Data <br> <i>import.rs</i>] --> C
-  C --> D[WASP <br> <i>wasp.rs</i>]
+    C --> D[WASP <br> <i>wasp.rs</i>]
     D --> E[Document <br> <i>document.rs</i>] --> H[Exported Data <br> <i>export.rs</i>]
     E --> F[Collection <br> <i>collection.rs</i>] --> H
     F --> G[Database <br> <i>engine.rs</i>] --> H
@@ -255,22 +269,37 @@ nexus_lite
 - Purpose: Provides a Rust API abstraction for embedding into apps.
 - Features:
   - Convenience helpers around core engine operations
+  - Find/Count and Updates/Deletes: `find`, `count`, `update_many`, `update_one`, `delete_many`, `delete_one`
+  - JSON helpers: `parse_filter_json`, `parse_update_json`
+  - Import/Export helpers: `import`, `export`
+  - Database/Collections management (FFI-friendly): `db_open`, `db_create_collection`, `db_list_collections`, `db_delete_collection`, `db_rename_collection`
   - Stable surface for embedding while internals evolve
 
 ### CLI Module: cli.rs
 
-- Purpose: Provides CLI support for developers.
+- Purpose: Provides CLI support for developers and DB administration.
 - Features:
-  - Command enum with Import/Export operations
-  - Simple format parsers and option mapping
+  - Import/Export commands
+  - Collection management: `ColCreate`, `ColDelete`, `ColList`, `ColRename`
+  - Query commands: `QueryFind`, `QueryCount`, `QueryUpdate`, `QueryDelete`, plus single-doc `QueryUpdateOne`, `QueryDeleteOne`
   - Programmatic entrypoint `cli::run(engine, cmd)` returning reports
+
+  ### Query Module: query.rs
+
+  - Purpose: Typed, injection-safe query and update engine.
+  - Features:
+    - Filter DSL: $eq/$gt/$gte/$lt/$lte, $in/$nin, $exists, $and/$or/$not
+    - Optional $regex (feature flag "regex") with pattern-length guard
+    - Projection, multi-key stable sort, pagination (limit/skip)
+  - Update ops: $set, $inc, $unset; UpdateReport/DeleteReport; single-ops `update_one`, `delete_one`
+    - FindOptions has optional timeout_ms for best-effort cancellation
 
 ### Database Module: lib.rs
 
 - Purpose: User-facing database wrapper around Engine with ergonomic helpers.
 - Features:
   - `Database::new()` and `Database::open(path)` for setup
-  - Collection management: create/get/delete, list names
+  - Collection management: create/get/delete, list names, `rename_collection`
   - Document helpers: insert/update/delete
   - `nexus_lite::init()` to initialize logging
 
@@ -293,12 +322,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Create a collection
   db.create_collection("users");
 
+  // Optionally rename a collection (admin)
+  db.rename_collection("users", "people")?;
+
   // Insert a document
   let user_doc = Document::new(doc!({"username": "alice", "age": 30}), DocumentType::Persistent);
-  let doc_id = db.insert_document("users", user_doc)?;
+  let doc_id = db.insert_document("people", user_doc)?;
 
   // Query document
-  let users = db.get_collection("users").unwrap();
+  let users = db.get_collection("people").unwrap();
   let found = users.find_document(&doc_id).unwrap();
   println!("Found: {:?}", found);
 
@@ -348,6 +380,67 @@ Notes
 - Pandas: `pd.read_json('export/users.jsonl', lines=True)` reads NDJSON efficiently.
 
 ---
+
+## Query & Update examples
+
+Programmatic query API with typed filters and updates.
+
+```rust
+use bson::{doc, Bson};
+use nexus_lite::document::{Document, DocumentType};
+use nexus_lite::query::{Filter, CmpOp, FindOptions, SortSpec, Order, UpdateDoc};
+use nexus_lite::Database;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let db = Database::open("mydb.db")?;
+  db.create_collection("users");
+  db.insert_document("users", Document::new(doc!({"name": "alice", "age": 30}), DocumentType::Persistent))?;
+  db.insert_document("users", Document::new(doc!({"name": "bob", "age": 40}), DocumentType::Persistent))?;
+
+  // Find: age > 30, project name only, sort by age desc, limit 1
+  let filter = Filter::Cmp { path: "age".into(), op: CmpOp::Gt, value: Bson::from(30) };
+  let opts = FindOptions {
+    projection: Some(vec!["name".into()]),
+    sort: Some(vec![SortSpec { field: "age".into(), order: Order::Desc }]),
+    limit: Some(1),
+    skip: Some(0),
+    timeout_ms: Some(250), // optional best-effort timeout
+  };
+  let docs = db.find("users", &filter, &opts)?.to_vec();
+  assert_eq!(docs.len(), 1);
+
+  // Count
+  let count = db.count("users", &filter)?;
+  assert_eq!(count, 1);
+
+  // Update: $inc age by 1 for all with age >= 30
+  let upd_filter = Filter::Cmp { path: "age".into(), op: CmpOp::Gte, value: Bson::from(30) };
+  let upd = UpdateDoc { set: vec![], inc: vec![("age".into(), 1.0)], unset: vec![] };
+  let report = db.update_many("users", &upd_filter, &upd)?;
+  println!("matched={} modified={}", report.matched, report.modified);
+
+  // Delete: remove users named carol
+  let del_filter = Filter::Cmp { path: "name".into(), op: CmpOp::Eq, value: Bson::from("carol") };
+  let del = db.delete_many("users", &del_filter)?;
+  println!("deleted={}", del.deleted);
+  Ok(())
+}
+```
+
+JSON parsing helpers
+
+```rust
+use nexus_lite::query::{parse_filter_json, parse_update_json};
+
+let f = parse_filter_json(r#"{"field":"age", "$gt": 21}"#)?; // Filter
+let u = parse_update_json(r#"{"$set":{"active":true}, "$inc":{"logins":1}}"#)?; // UpdateDoc
+```
+
+Notes
+
+- $regex is behind the Cargo feature flag "regex". When enabled, only safe-length patterns (<= 512 chars) are accepted.
+- FindOptions::timeout_ms cancels long scans on a best-effort basis.
+- Logs are written to `{db_name}_logs/nexuslite.log` when opening a database.
 
 ## Future Enhancements
 

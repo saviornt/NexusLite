@@ -14,7 +14,7 @@ async fn test_collection_new() {
     let wal = Wal::new(wal_path).unwrap();
     let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wal)));
     let collection = Collection::new("test_collection".to_string(), storage, 10);
-    assert_eq!(collection.name, "test_collection");
+    assert_eq!(collection.name_str(), "test_collection");
 }
 
 #[tokio::test]

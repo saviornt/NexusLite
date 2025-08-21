@@ -8,6 +8,7 @@ pub mod engine;
 pub mod errors;
 pub mod export;
 pub mod import;
+pub mod query;
 pub mod logger;
 pub mod types;
 pub mod wal;
@@ -18,7 +19,7 @@ use crate::document::Document;
 use crate::engine::Engine;
 use crate::errors::DbError;
 use crate::types::DocumentId;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 /// The main database struct.
@@ -29,10 +30,8 @@ pub struct Database {
 impl Database {
     /// Creates a new in-memory database instance.
     pub fn new() -> Result<Self, DbError> {
-        let engine = Engine::with_wasp(PathBuf::from("wasp.bin")).map_err(|e| DbError::Io(e.to_string()))?;
-        Ok(Database {
-            engine: Arc::new(engine),
-        })
+    // Default on-disk files to align with API expectations
+    Self::open("nexuslite.db")
     }
 
     /// Opens or creates a database file and its associated WASP file.
@@ -54,6 +53,10 @@ impl Database {
                 .map_err(|e| DbError::Io(format!("Failed to create WASP file: {}", e)))?;
         }
 
+        // Initialize logging scoped to db name
+        if let Some(stem) = db_path.file_stem().and_then(|s| s.to_str()) {
+            let _ = crate::logger::init_for_db(stem);
+        }
         // Open the WASP engine using the .wasp file
         let engine = Engine::with_wasp(wasp_path)
             .map_err(|e| DbError::Io(e.to_string()))?;
@@ -102,6 +105,42 @@ impl Database {
     /// Lists the names of all collections.
     pub fn list_collection_names(&self) -> Vec<String> {
         self.engine.list_collection_names()
+    }
+
+    /// Rename a collection.
+    pub fn rename_collection(&self, old: &str, new: &str) -> Result<(), DbError> {
+        self.engine.rename_collection(old, new)
+    }
+
+    // --- Query API (façade over query module) ---
+    pub fn find(&self, collection_name: &str, filter: &crate::query::Filter, opts: &crate::query::FindOptions) -> Result<crate::query::Cursor, DbError> {
+        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        Ok(crate::query::find_docs(&col, filter, opts))
+    }
+
+    pub fn count(&self, collection_name: &str, filter: &crate::query::Filter) -> Result<usize, DbError> {
+        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        Ok(crate::query::count_docs(&col, filter))
+    }
+
+    pub fn update_many(&self, collection_name: &str, filter: &crate::query::Filter, update: &crate::query::UpdateDoc) -> Result<crate::query::UpdateReport, DbError> {
+        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        Ok(crate::query::update_many(&col, filter, update))
+    }
+
+    pub fn update_one(&self, collection_name: &str, filter: &crate::query::Filter, update: &crate::query::UpdateDoc) -> Result<crate::query::UpdateReport, DbError> {
+        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        Ok(crate::query::update_one(&col, filter, update))
+    }
+
+    pub fn delete_many(&self, collection_name: &str, filter: &crate::query::Filter) -> Result<crate::query::DeleteReport, DbError> {
+        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        Ok(crate::query::delete_many(&col, filter))
+    }
+
+    pub fn delete_one(&self, collection_name: &str, filter: &crate::query::Filter) -> Result<crate::query::DeleteReport, DbError> {
+        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        Ok(crate::query::delete_one(&col, filter))
     }
 }
 

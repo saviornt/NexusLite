@@ -8,7 +8,7 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time;
+// use of std::thread for background purge avoids requiring a Tokio runtime in sync contexts
 
 /// Eviction modes to control cache behavior.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,17 +116,17 @@ impl Cache {
             sizes: Arc::new(RwLock::new(HashMap::new())),
         };
 
-        // Spawn a background task for TTL eviction
-    let store_clone = cache.store.clone();
-    let metrics_clone = cache.metrics.clone();
-    let config_clone = cache.config.clone();
-    let sizes_clone = cache.sizes.clone();
-    let freq_clone = cache.freq.clone();
-        tokio::spawn(async move {
+        // Spawn a background thread for TTL eviction
+        let store_clone = cache.store.clone();
+        let metrics_clone = cache.metrics.clone();
+        let config_clone = cache.config.clone();
+        let sizes_clone = cache.sizes.clone();
+        let freq_clone = cache.freq.clone();
+        std::thread::spawn(move || {
             loop {
                 let secs = config_clone.read().purge_interval_secs;
-                time::sleep(Duration::from_secs(secs)).await;
-        purge_expired(&store_clone, &metrics_clone, &sizes_clone, &freq_clone);
+                std::thread::sleep(Duration::from_secs(secs));
+                purge_expired(&store_clone, &metrics_clone, &sizes_clone, &freq_clone);
             }
         });
 

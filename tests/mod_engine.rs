@@ -20,7 +20,7 @@ async fn test_create_and_get_collection() {
     engine.create_collection(collection_name.to_string());
 
     let collection = engine.get_collection(collection_name).unwrap();
-    assert_eq!(collection.name, collection_name);
+    assert_eq!(collection.name_str(), collection_name.to_string());
 }
 
 #[tokio::test]

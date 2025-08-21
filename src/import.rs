@@ -69,6 +69,7 @@ pub struct ImportReport {
 }
 
 pub fn import_file<P: AsRef<Path>>(engine: &Engine, path: P, opts: &ImportOptions) -> io::Result<ImportReport> {
+    log::info!("import: path={}, collection={}", path.as_ref().display(), opts.collection);
     let file = File::open(&path)?;
     let mut reader = BufReader::new(file);
     let format = match opts.format {
