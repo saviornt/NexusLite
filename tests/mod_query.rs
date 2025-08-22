@@ -26,6 +26,22 @@ fn update_set_inc_unset() {
 }
 
 #[test]
+fn update_inc_int64_and_cmp_lt_not() {
+    // Int64 increment should be handled and result stored as Double
+    let mut d = Document::new(doc!{"age": bson::Bson::Int64(30)}, DocumentType::Persistent);
+    let upd = UpdateDoc { set: vec![], inc: vec![("age".into(), 2.0)], unset: vec![] };
+    let changed = apply_update(&mut d, &upd);
+    assert!(changed);
+    assert_eq!(d.data.0.get_f64("age").unwrap(), 32.0);
+
+    // Lt branch should work, and Not should invert
+    let f_lt = Filter::Cmp { path: "age".into(), op: CmpOp::Lt, value: 40.into() };
+    assert!(nexus_lite::query::eval_filter(&d.data.0, &f_lt));
+    let f_not = Filter::Not(Box::new(f_lt));
+    assert!(!nexus_lite::query::eval_filter(&d.data.0, &f_not));
+}
+
+#[test]
 fn find_sort_project_paginate() {
     use nexus_lite::engine::Engine;
     use tempfile::tempdir;

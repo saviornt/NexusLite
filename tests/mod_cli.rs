@@ -3,6 +3,7 @@ use nexus_lite::engine::Engine;
 use std::fs;
 use std::io::Write;
 use tempfile::tempdir;
+use nexus_lite::errors::DbError;
 
 #[tokio::test]
 async fn test_cli_import_export_ndjson() {
@@ -36,4 +37,32 @@ async fn test_cli_import_export_ndjson() {
     let s = fs::read_to_string(out_path).unwrap();
     assert!(s.contains("alice"));
     assert!(s.contains("bob"));
+}
+
+#[tokio::test]
+async fn test_cli_telemetry_rate_limit() {
+    let dir = tempdir().unwrap();
+    let wal_path = dir.path().join("wal.log");
+    let engine = Engine::new(wal_path).unwrap();
+
+    // Create collection and set a very tight rate limit
+    let col = engine.create_collection("users".to_string());
+    nexus_lite::telemetry::configure_rate_limit(&col.name_str(), 1, 0);
+
+    // First count ok
+    let filter = "true".to_string();
+    let ok = run(&engine, Command::QueryCount { collection: col.name_str(), filter_json: filter.clone() });
+    assert!(ok.is_ok());
+    // Second count should be rate-limited
+    let err = run(&engine, Command::QueryCount { collection: col.name_str(), filter_json: filter });
+    match err {
+        Ok(_) => panic!("expected rate limited error"),
+        Err(e) => {
+            if let Some(db) = e.downcast_ref::<DbError>() {
+                assert!(matches!(db, DbError::RateLimited));
+            } else {
+                panic!("unexpected error type: {}", e);
+            }
+        }
+    }
 }

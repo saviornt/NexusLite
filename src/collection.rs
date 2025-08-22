@@ -5,6 +5,7 @@ use crate::wasp::{StorageEngine, IndexDelta, DeltaOp, DeltaKey};
 use crate::index::{IndexManager, IndexKind, index_insert_all, index_remove_all, IndexImpl};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use crate::telemetry;
 
 pub struct Collection {
     pub name: Arc<RwLock<String>>,
@@ -45,6 +46,7 @@ impl Collection {
     }
     // Then apply to cache and indexes
     self.cache.insert(document.clone());
+    telemetry::log_audit("insert", &self.name_str(), &doc_id.0.to_string(), None);
     index_insert_all(&mut self.indexes.write(), &document.data.0, &doc_id);
     // Emit index deltas for WASP overlay
     let mut st = self.storage.write();
@@ -81,6 +83,7 @@ impl Collection {
             index_remove_all(&mut self.indexes.write(), &old.data.0, id);
             self.cache.insert(new_doc_same_id.clone());
             index_insert_all(&mut self.indexes.write(), &new_doc_same_id.data.0, id);
+            telemetry::log_audit("update", &self.name_str(), &id.0.to_string(), None);
             // Emit remove deltas for old keys and add deltas for new keys
             let mut st = self.storage.write();
             for (field, idx) in self.indexes.read().indexes.iter() {
@@ -118,6 +121,7 @@ impl Collection {
             // Then remove from cache and indexes
             let _ = self.cache.remove(id);
             index_remove_all(&mut self.indexes.write(), &old.data.0, id);
+            telemetry::log_audit("delete", &self.name_str(), &id.0.to_string(), None);
             // Emit remove deltas
             let mut st = self.storage.write();
             for (field, idx) in self.indexes.read().indexes.iter() {

@@ -331,6 +331,59 @@ enum Commands {
         #[arg(help = "Username used during encryption")]
         username: String,
     },
+    // Telemetry/observability
+    #[command(name = "telemetry-set-slow", about = "Set slow query threshold in milliseconds")]
+    TelemetrySetSlow {
+        #[arg(help = "Milliseconds threshold for slow query logging")]
+        ms: u64,
+    },
+    #[command(name = "telemetry-set-audit", about = "Enable or disable audit logging")]
+    TelemetrySetAudit {
+        #[arg(help = "true/false to enable or disable audit logging")]
+        enabled: bool,
+    },
+    #[command(name = "telemetry-set-query-log", about = "Configure query log path and options")]
+    TelemetrySetQueryLog {
+        #[arg(help = "Path to write query logs (JSON lines when structured)")]
+        path: PathBuf,
+        #[arg(long, help = "Optional slow query threshold in ms (overrides globally)")]
+        slow_ms: Option<u64>,
+        #[arg(long, help = "Structured JSON output true/false (default true)")]
+        structured: Option<bool>,
+    },
+    #[command(name = "telemetry-set-max-global", about = "Set global max result size for queries")]
+    TelemetrySetMaxGlobal {
+        #[arg(help = "Maximum number of results for queries (global cap)")]
+        limit: usize,
+    },
+    #[command(name = "telemetry-set-max-for", about = "Set max result size for a specific collection")]
+    TelemetrySetMaxFor {
+        #[arg(help = "Collection name")]
+        collection: String,
+        #[arg(help = "Maximum number of results for this collection")]
+        limit: usize,
+    },
+    #[command(name = "telemetry-rate-limit", about = "Configure a per-collection token bucket rate limit")]
+    TelemetryRateLimit {
+        #[arg(help = "Collection name")]
+        collection: String,
+        #[arg(help = "Bucket capacity (max tokens)")]
+        capacity: u64,
+        #[arg(help = "Refill tokens per second")]
+        refill_per_sec: u64,
+    },
+    #[command(name = "telemetry-rate-remove", about = "Remove a per-collection rate limit")]
+    TelemetryRateRemove {
+        #[arg(help = "Collection name")]
+        collection: String,
+    },
+    #[command(name = "telemetry-rate-default", about = "Set default per-collection rate limit")]
+    TelemetryRateDefault {
+        #[arg(help = "Bucket capacity (max tokens)")]
+        capacity: u64,
+        #[arg(help = "Refill tokens per second")]
+        refill_per_sec: u64,
+    },
 }
 
 fn ensure_engine(db_override: &Option<PathBuf>, cfg: &AppConfig) -> Result<Engine, Box<dyn std::error::Error>> {
@@ -469,6 +522,14 @@ fn main() {
     Commands::RestoreEncrypted { db_path, key_priv, input } => prog_cli::run(&engine, prog_cli::Command::RestoreEncrypted { db_path, key_priv, input }),
     Commands::EncryptDbPbe { db_path, username } => prog_cli::run(&engine, prog_cli::Command::EncryptDbPbe { db_path, username }),
     Commands::DecryptDbPbe { db_path, username } => prog_cli::run(&engine, prog_cli::Command::DecryptDbPbe { db_path, username }),
+    Commands::TelemetrySetSlow { ms } => prog_cli::run(&engine, prog_cli::Command::TelemetrySetSlow { ms }),
+    Commands::TelemetrySetAudit { enabled } => prog_cli::run(&engine, prog_cli::Command::TelemetrySetAudit { enabled }),
+    Commands::TelemetrySetQueryLog { path, slow_ms, structured } => prog_cli::run(&engine, prog_cli::Command::TelemetrySetQueryLog { path, slow_ms, structured }),
+    Commands::TelemetrySetMaxGlobal { limit } => prog_cli::run(&engine, prog_cli::Command::TelemetrySetMaxGlobal { limit }),
+    Commands::TelemetrySetMaxFor { collection, limit } => prog_cli::run(&engine, prog_cli::Command::TelemetrySetMaxFor { collection, limit }),
+    Commands::TelemetryRateLimit { collection, capacity, refill_per_sec } => prog_cli::run(&engine, prog_cli::Command::TelemetryRateLimit { collection, capacity, refill_per_sec }),
+    Commands::TelemetryRateRemove { collection } => prog_cli::run(&engine, prog_cli::Command::TelemetryRateRemove { collection }),
+    Commands::TelemetryRateDefault { capacity, refill_per_sec } => prog_cli::run(&engine, prog_cli::Command::TelemetryRateDefault { capacity, refill_per_sec }),
         Commands::Info => {
             // Print basic stats; for now, collection names and cache metrics
             let names = engine.list_collection_names();

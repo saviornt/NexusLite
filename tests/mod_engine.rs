@@ -49,3 +49,4 @@ async fn test_list_collection_names() {
     assert!(names.contains(&"users".to_string()));
     assert!(names.contains(&"products".to_string()));
 }
+

@@ -17,6 +17,27 @@ async fn test_import_ndjson_basic() {
     assert_eq!(col.get_all_documents().len(), 2);
 }
 
+#[test]
+fn test_import_ndjson_skip_errors_behavior() {
+    let dir = tempfile::tempdir().unwrap();
+    let wal = dir.path().join("imp_skip_errs_wal.bin");
+    let engine = nexus_lite::engine::Engine::new(wal).unwrap();
+    let col = "users";
+    // Two good lines and one bad JSON line in the middle
+    let data = "{\"name\":\"a\"}\nnot-json\n{\"name\":\"b\"}\n";
+    // skip_errors = true -> inserts 2 and skips 1
+    let mut opts = nexus_lite::import::ImportOptions { collection: col.into(), ..Default::default() };
+    opts.skip_errors = true;
+    let rep = nexus_lite::import::import_from_reader(&engine, std::io::Cursor::new(data.as_bytes()), nexus_lite::import::ImportFormat::Ndjson, &opts).unwrap();
+    assert_eq!(rep.inserted, 2);
+    assert_eq!(rep.skipped, 1);
+    // skip_errors = false -> returns error
+    let mut opts2 = nexus_lite::import::ImportOptions { collection: col.into(), ..Default::default() };
+    opts2.skip_errors = false;
+    let err = nexus_lite::import::import_from_reader(&engine, std::io::Cursor::new(data.as_bytes()), nexus_lite::import::ImportFormat::Ndjson, &opts2).err();
+    assert!(err.is_some());
+}
+
 #[tokio::test]
 async fn test_import_csv_headers() {
     let dir = tempdir().unwrap();

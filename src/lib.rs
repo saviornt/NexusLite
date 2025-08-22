@@ -17,6 +17,7 @@ pub mod wal;
 pub mod wasp;
 pub mod index;
 pub mod fsutil;
+pub mod telemetry;
 
 
 use crate::collection::Collection;

@@ -3,8 +3,8 @@
 use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
 use hkdf::Hkdf;
 use p256::{ecdsa::{signature::{Signer, Verifier}, Signature, SigningKey, VerifyingKey}, pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey}, PublicKey, SecretKey};
-use rand::rngs::OsRng;
-use rand::RngCore;
+// Use the rand_core re-export compatible with p256/aes-gcm to avoid version conflicts
+use p256::elliptic_curve::rand_core::{OsRng, RngCore};
 use sha2::Sha256;
 use std::fs;
 use std::io::{Read, Write};

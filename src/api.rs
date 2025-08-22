@@ -76,13 +76,13 @@ pub fn db_rename_collection(db: &crate::Database, old: &str, new: &str) -> Resul
 
 pub fn find(engine: &Engine, collection: &str, filter: &Filter, opts: &FindOptions) -> Result<Vec<bson::Document>, DbError> {
     let col = engine.get_collection(collection).ok_or_else(|| DbError::NoSuchCollection(collection.to_string()))?;
-    let cur = query::find_docs(&col, filter, opts);
+    let cur = query::find_docs_rate_limited(&col, filter, opts)?;
     Ok(cur.to_vec().into_iter().map(|d| d.data.0).collect())
 }
 
 pub fn count(engine: &Engine, collection: &str, filter: &Filter) -> Result<usize, DbError> {
     let col = engine.get_collection(collection).ok_or_else(|| DbError::NoSuchCollection(collection.to_string()))?;
-    Ok(query::count_docs(&col, filter))
+    query::count_docs_rate_limited(&col, filter)
 }
 
 pub fn update_many(engine: &Engine, collection: &str, filter: &Filter, update: &UpdateDoc) -> Result<crate::query::UpdateReport, DbError> {
@@ -259,3 +259,30 @@ pub fn decrypt_db_with_password(db_path: &Path, username: &str, password: &str) 
     }
     Ok(())
 }
+
+// --- Telemetry/Observability configuration API ---
+
+/// Set the database name for telemetry context (used in logs).
+pub fn telemetry_set_db_name(db_name: &str) { crate::telemetry::set_db_name(db_name); }
+
+/// Configure query log path and optional slow-query threshold and structured JSON toggle.
+pub fn telemetry_set_query_log(path: PathBuf, slow_query_ms: Option<u64>, structured_json: Option<bool>) {
+    crate::telemetry::set_query_log(path, slow_query_ms, structured_json);
+}
+
+/// Enable or disable audit logging.
+pub fn telemetry_set_audit_enabled(enabled: bool) { crate::telemetry::set_audit_enabled(enabled); }
+
+/// Set global max result limit and per-collection overrides.
+pub fn telemetry_set_max_results_global(limit: usize) { crate::telemetry::set_max_result_limit_global(limit); }
+pub fn telemetry_set_max_results_for(collection: &str, limit: usize) { crate::telemetry::set_max_result_limit_for(collection, limit); }
+
+/// Configure per-collection token bucket rate limit.
+pub fn telemetry_configure_rate_limit(collection: &str, capacity: u64, refill_per_sec: u64) {
+    crate::telemetry::configure_rate_limit(collection, capacity, refill_per_sec);
+}
+/// Remove a per-collection rate limit.
+pub fn telemetry_remove_rate_limit(collection: &str) { crate::telemetry::remove_rate_limit(collection); }
+
+/// Set default per-collection rate limit used when not explicitly configured.
+pub fn telemetry_set_default_rate_limit(capacity: u64, refill_per_sec: u64) { crate::telemetry::set_default_rate_limit(capacity, refill_per_sec); }

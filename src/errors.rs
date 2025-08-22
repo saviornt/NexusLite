@@ -49,4 +49,7 @@ pub enum DbError {
 
     #[error("Database Not Found")]
     DatabaseNotFound,
+
+    #[error("rate-limited")]
+    RateLimited,
 }

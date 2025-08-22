@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::sync::Arc;
 use crate::wasp::{DeltaKey, DeltaOp};
+use crate::telemetry;
+use crate::errors::DbError;
 
 // Safety limits to prevent resource abuse
 const MAX_PATH_DEPTH: usize = 32;
@@ -261,7 +263,10 @@ pub fn delete_one(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
 }
 
 pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> Cursor {
+    // Basic per-collection rate limit: consume a token; if absent path may be used by CLI/API prechecks.
+    let _ = telemetry::try_consume_token(&col.name_str(), 1);
     let deadline = opts.timeout_ms.map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms));
+    let start_t = std::time::Instant::now();
     let needs_projection = opts.projection.is_some();
 
     // If no projection is needed, prefer a lazy path accumulating only IDs to avoid cloning many docs.
@@ -277,10 +282,14 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
             if let Some(dl) = deadline && std::time::Instant::now() > dl { return false; }
             col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false)
         });
-        let skip = opts.skip.unwrap_or(0);
-        let limit = opts.limit.unwrap_or(usize::MAX).min(MAX_LIMIT);
+    let skip = opts.skip.unwrap_or(0);
+    // Enforce global max result size from telemetry (abuse resistance)
+    let max_res = telemetry::max_result_limit_for(&col.name_str()).min(MAX_LIMIT);
+    let limit = opts.limit.unwrap_or(usize::MAX).min(max_res);
         let end = skip.saturating_add(limit).min(ids.len());
         let sliced: Vec<_> = if skip >= ids.len() { Vec::new() } else { ids[skip..end].to_vec() };
+    let dur = start_t.elapsed().as_millis();
+    telemetry::log_query(&col.name_str(), &format!("{:?}", filter_type_name(filter)), dur, opts.limit, opts.skip, None);
         return Cursor { collection: col.clone(), ids: sliced, pos: 0, docs: None };
     }
 
@@ -299,7 +308,8 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
     sort_docs(&mut docs, &limited_specs);
     }
     let skip = opts.skip.unwrap_or(0);
-    let limit = opts.limit.unwrap_or(usize::MAX).min(MAX_LIMIT);
+    let max_res = telemetry::max_result_limit_for(&col.name_str()).min(MAX_LIMIT);
+    let limit = opts.limit.unwrap_or(usize::MAX).min(max_res);
     let end = skip.saturating_add(limit).min(docs.len());
     let slice = if skip >= docs.len() { &docs[0..0] } else { &docs[skip..end] };
     let mut projected: Vec<Document> = slice.to_vec();
@@ -310,7 +320,24 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
         }
     }
     let ids = projected.iter().map(|d| d.id.clone()).collect();
+    let dur = start_t.elapsed().as_millis();
+    telemetry::log_query(&col.name_str(), &format!("{:?}", filter_type_name(filter)), dur, opts.limit, opts.skip, None);
     Cursor { collection: col.clone(), ids, pos: 0, docs: Some(projected) }
+}
+
+fn filter_type_name(f: &Filter) -> &'static str {
+    match f {
+        Filter::True => "true",
+        Filter::And(_) => "$and",
+        Filter::Or(_) => "$or",
+        Filter::Not(_) => "$not",
+        Filter::Exists { .. } => "$exists",
+        Filter::In { .. } => "$in",
+        Filter::Nin { .. } => "$nin",
+        Filter::Cmp { op, .. } => match op { CmpOp::Eq => "$eq", CmpOp::Gt => "$gt", CmpOp::Gte => "$gte", CmpOp::Lt => "$lt", CmpOp::Lte => "$lte" },
+        #[cfg(feature = "regex")]
+        Filter::Regex { .. } => "$regex",
+    }
 }
 
 fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<DocumentId>> {
@@ -420,11 +447,29 @@ fn delta_key_in_range(key: &DeltaKey, min: Option<&Bson>, max: Option<&Bson>, in
 }
 
 pub fn count_docs(col: &Arc<Collection>, filter: &Filter) -> usize {
+    let _ = telemetry::try_consume_token(&col.name_str(), 1);
     if let Some(cands) = plan_index_candidates(col, filter) {
         cands.into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count()
     } else {
     col.list_ids().into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count()
     }
+}
+
+/// Rate-limit aware variants returning explicit errors instead of partial results.
+pub fn find_docs_rate_limited(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> Result<Cursor, DbError> {
+    if telemetry::would_limit(&col.name_str(), 1) {
+        telemetry::log_rate_limited(&col.name_str(), "find");
+        return Err(DbError::RateLimited);
+    }
+    Ok(find_docs(col, filter, opts))
+}
+
+pub fn count_docs_rate_limited(col: &Arc<Collection>, filter: &Filter) -> Result<usize, DbError> {
+    if telemetry::would_limit(&col.name_str(), 1) {
+        telemetry::log_rate_limited(&col.name_str(), "count");
+        return Err(DbError::RateLimited);
+    }
+    Ok(count_docs(col, filter))
 }
 
 pub fn eval_filter(doc: &BsonDocument, f: &Filter) -> bool {

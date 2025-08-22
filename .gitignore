@@ -4,3 +4,16 @@ ProjectStructure.md
 generate_project_structure.py
 coding_prompts.txt
 *.bin
+ 
+# Mutation testing outputs
+/mutants.out/
+/mutants.out.old/
+
+# Logs
+*.log
+**/visible_test_logs/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp

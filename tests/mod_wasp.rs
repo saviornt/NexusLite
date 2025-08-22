@@ -176,7 +176,7 @@ fn manifest_corruption_and_recovery() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("corrupt_recover.wasp");
     // Initialize WASP file with both manifest slots valid
-    let mut wf = WaspFile::open(path.clone()).unwrap();
+    let _wf = WaspFile::open(path.clone()).unwrap();
     // Corrupt the first manifest slot
     {
         let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
@@ -190,7 +190,8 @@ fn manifest_corruption_and_recovery() {
         f.sync_data().unwrap();
     }
     // read_manifest should still succeed by picking the second (valid) slot
-    let m = wf.read_manifest().unwrap();
+    let mut wf2 = WaspFile::open(path.clone()).unwrap();
+    let m = wf2.read_manifest().unwrap();
     assert!(m.version >= 1);
     // Consistency checker should detect that not both slots are valid
     {
@@ -286,4 +287,48 @@ fn test_torn_write_protect_roundtrip() {
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).unwrap();
     assert!(buf.windows(data.len()).any(|w| w == data));
+}
+
+#[test]
+fn test_recover_manifests_copies_newest_slot() {
+    use nexus_lite::wasp::{WASP_PAGE_SIZE, recover_manifests};
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("recover_slots.wasp");
+    // Initialize with valid manifest in both slots
+    let _wf = WaspFile::open(path.clone()).unwrap();
+    // Manually write a newer manifest into slot 1 only
+    let mut newer = Manifest::new();
+    newer.version = 5;
+    let data = newer.to_bytes();
+    let page = Page::new(0, newer.version, 1, data);
+    let bytes = bincode::serde::encode_to_vec(&page, bincode::config::standard()).unwrap();
+    {
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        use std::io::{Seek, SeekFrom, Write};
+        f.seek(SeekFrom::Start(WASP_PAGE_SIZE as u64)).unwrap();
+        f.write_all(&bytes).unwrap();
+        f.sync_data().unwrap();
+    }
+    // Now recover; implementation should copy newest slot over the other if versions differ
+    {
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let rep = recover_manifests(&mut f).unwrap();
+        assert!(rep.both_valid);
+        assert_eq!(rep.slots[0].version, Some(5));
+        assert_eq!(rep.slots[1].version, Some(5));
+    }
+}
+
+#[test]
+fn test_block_allocator_export_persists_in_manifest() {
+    // Create a new wasp file and allocate a few pages, then ensure export_to_manifest writes allocator state
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("alloc_export.wasp");
+    let file = WaspFile::open(path).unwrap();
+    let mut tree = CowTree::new(file).unwrap();
+    // Allocate a few pages via inserts
+    for i in 0..3u8 { tree.insert(vec![i], vec![i]).unwrap(); }
+    // Read manifest; it should contain non-default allocator state
+    let m = tree.file.read_manifest().unwrap();
+    assert!(m.next_page_id > 1, "expected allocator next_page_id to advance");
 }

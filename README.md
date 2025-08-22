@@ -157,6 +157,24 @@ nexuslite shell
 #   exit
 ```
 
+### Telemetry and abuse resistance
+
+You can tune observability and abuse resistance at runtime:
+
+- Set slow query threshold (ms): `nexuslite telemetry-set-slow <ms>`
+- Enable/disable audit logging: `nexuslite telemetry-set-audit <true|false>`
+- Configure query log path and options: `nexuslite telemetry-set-query-log <path> [--slow-ms N] [--structured true|false]`
+- Max results: global `nexuslite telemetry-set-max-global <N>`; per-collection `nexuslite telemetry-set-max-for <collection> <N>`
+- Basic per-collection rate limiting (token bucket):
+  - Configure: `nexuslite telemetry-rate-limit <collection> <capacity> <refill_per_sec>`
+  - Remove: `nexuslite telemetry-rate-remove <collection>`
+
+Programmatic API mirrors these via `nexus_lite::api::*` functions:
+
+- `telemetry_set_db_name`, `telemetry_set_query_log`, `telemetry_set_audit_enabled`
+- `telemetry_set_max_results_global`, `telemetry_set_max_results_for`
+- `telemetry_configure_rate_limit`, `telemetry_remove_rate_limit`
+
 ### Encrypted open (PBE) and signature verification
 
 If your `.db`/`.wasp` are password-based encrypted (PBE), NexusLite will decrypt on open.

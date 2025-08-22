@@ -2,6 +2,7 @@ use crate::engine::Engine;
 use crate::export::{export_file, ExportFormat, ExportOptions};
 use crate::import::{import_file, ImportFormat, ImportOptions};
 use crate::query::{self, FindOptions, Order, SortSpec};
+use crate::errors::DbError;
 use std::path::PathBuf;
 use std::io::Write;
 
@@ -36,6 +37,15 @@ pub enum Command {
     CryptoVerifyFile { key_pub: PathBuf, input: PathBuf, sig: PathBuf },
     CryptoEncryptFile { key_pub: PathBuf, input: PathBuf, output: PathBuf },
     CryptoDecryptFile { key_priv: PathBuf, input: PathBuf, output: PathBuf },
+    // Telemetry/observability configuration
+    TelemetrySetSlow { ms: u64 },
+    TelemetrySetAudit { enabled: bool },
+    TelemetrySetQueryLog { path: PathBuf, #[allow(dead_code)] slow_ms: Option<u64>, #[allow(dead_code)] structured: Option<bool> },
+    TelemetrySetMaxGlobal { limit: usize },
+    TelemetrySetMaxFor { collection: String, limit: usize },
+    TelemetryRateLimit { collection: String, capacity: u64, refill_per_sec: u64 },
+    TelemetryRateRemove { collection: String },
+    TelemetryRateDefault { capacity: u64, refill_per_sec: u64 },
     // Encrypted checkpoint/restore
     CheckpointEncrypted { db_path: PathBuf, key_pub: PathBuf, output: PathBuf },
     RestoreEncrypted { db_path: PathBuf, key_priv: PathBuf, input: PathBuf },
@@ -130,6 +140,10 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
         }
         Command::QueryFind { collection, filter_json, project, sort, limit, skip } => {
             let col = engine.get_collection(&collection).ok_or_else(|| crate::errors::DbError::NoSuchCollection(collection.clone()))?;
+            if crate::telemetry::would_limit(&col.name_str(), 1) {
+                crate::telemetry::log_rate_limited(&collection, "find");
+                return Err(Box::new(DbError::RateLimited));
+            }
             let filter = query::parse_filter_json(&filter_json)?;
             let mut opts = FindOptions::default();
             if let Some(p) = project { opts.projection = Some(p.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()); }
@@ -153,6 +167,10 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
         }
         Command::QueryFindR { collection, filter_json, project, sort, limit, skip, redact_fields } => {
             let col = engine.get_collection(&collection).ok_or_else(|| crate::errors::DbError::NoSuchCollection(collection.clone()))?;
+            if crate::telemetry::would_limit(&col.name_str(), 1) {
+                crate::telemetry::log_rate_limited(&collection, "find");
+                return Err(Box::new(DbError::RateLimited));
+            }
             let filter = query::parse_filter_json(&filter_json)?;
             let mut opts = FindOptions::default();
             if let Some(p) = project { opts.projection = Some(p.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()); }
@@ -182,6 +200,10 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
         }
         Command::QueryCount { collection, filter_json } => {
             let col = engine.get_collection(&collection).ok_or_else(|| crate::errors::DbError::NoSuchCollection(collection.clone()))?;
+            if crate::telemetry::would_limit(&col.name_str(), 1) {
+                crate::telemetry::log_rate_limited(&collection, "count");
+                return Err(Box::new(DbError::RateLimited));
+            }
             let filter = query::parse_filter_json(&filter_json)?;
             let n = query::count_docs(&col, &filter);
             println!("{}", n);
@@ -305,6 +327,14 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             println!("decrypted: {} -> {}", input.to_string_lossy(), output.to_string_lossy());
             Ok(())
         }
+    Command::TelemetrySetSlow { ms } => { crate::telemetry::set_slow_query_ms(ms); println!("slow_query_ms={}", ms); Ok(()) }
+    Command::TelemetrySetAudit { enabled } => { crate::telemetry::set_audit_enabled(enabled); println!("audit={}", enabled); Ok(()) }
+    Command::TelemetrySetQueryLog { path, slow_ms, structured } => { crate::telemetry::set_query_log(path.clone(), slow_ms, structured); println!("query_log={}", path.to_string_lossy()); Ok(()) }
+    Command::TelemetrySetMaxGlobal { limit } => { crate::telemetry::set_max_result_limit_global(limit); println!("max_results_global={}", limit); Ok(()) }
+    Command::TelemetrySetMaxFor { collection, limit } => { crate::telemetry::set_max_result_limit_for(&collection, limit); println!("max_results[{}]={}", collection, limit); Ok(()) }
+    Command::TelemetryRateLimit { collection, capacity, refill_per_sec } => { crate::telemetry::configure_rate_limit(&collection, capacity, refill_per_sec); println!("rate_limit[{}]=cap:{} rps:{}", collection, capacity, refill_per_sec); Ok(()) }
+    Command::TelemetryRateRemove { collection } => { crate::telemetry::remove_rate_limit(&collection); println!("rate_limit removed [{}]", collection); Ok(()) }
+    Command::TelemetryRateDefault { capacity, refill_per_sec } => { crate::telemetry::set_default_rate_limit(capacity, refill_per_sec); println!("rate_limit_default cap:{} rps:{}", capacity, refill_per_sec); Ok(()) }
         Command::CheckpointEncrypted { db_path, key_pub, output } => {
             let db_path_str = db_path.to_str().ok_or("invalid db path")?;
             let db = crate::Database::open(db_path_str)?;

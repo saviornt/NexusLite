@@ -220,7 +220,7 @@ pub fn fuzz_test_corruption(file: &mut File) -> bool {
 	// Corrupt the first manifest slot and check if the second is still valid
 	if file.seek(SeekFrom::Start(0)).is_ok() {
 		let mut buf = vec![0u8; WASP_PAGE_SIZE];
-		let mut rng = rand::thread_rng();
+		let mut rng = rand::rng();
 		rng.fill_bytes(&mut buf);
 		if file.write_all(&buf).is_ok() && file.sync_data().is_ok() {
 			// Now check if the second manifest is still valid
