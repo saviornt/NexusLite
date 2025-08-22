@@ -202,7 +202,18 @@ pub fn pbe_is_encrypted(input: &std::path::Path) -> bool {
 /// PQC stubs for future work (ML-KEM, SPHINCS+)
 pub mod pqc {
 	/// Placeholder for ML-KEM key exchange
-	pub fn kem_derive_shared_secret() -> Result<(), &'static str> { Err("not implemented") }
+	pub fn kem_derive_shared_secret() -> Result<(), crate::errors::DbError> {
+		// Runtime feature flag gate: crypto-pqc is stubbed and must error if used.
+		if crate::feature_flags::is_enabled("crypto-pqc") {
+			return Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()));
+		}
+		Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()))
+	}
 	/// Placeholder for SPHINCS+ signature verify
-	pub fn sphincs_verify(_msg: &[u8], _sig: &[u8]) -> Result<bool, &'static str> { Err("not implemented") }
+	pub fn sphincs_verify(_msg: &[u8], _sig: &[u8]) -> Result<bool, crate::errors::DbError> {
+		if crate::feature_flags::is_enabled("crypto-pqc") {
+			return Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()));
+		}
+		Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()))
+	}
 }

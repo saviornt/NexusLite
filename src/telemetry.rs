@@ -206,6 +206,29 @@ pub fn would_limit(collection: &str, n: u64) -> bool {
     state.tokens < n as f64
 }
 
+/// Estimate milliseconds until enough tokens are available for `n`.
+pub fn retry_after_ms(collection: &str, n: u64) -> u64 {
+    let mut map = TELEMETRY.rate_limits.write();
+    if !map.contains_key(collection) {
+        let cfg = default_bucket_cfg();
+        map.insert(collection.to_string(), TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
+    }
+    if let Some(state) = map.get_mut(collection) {
+        let now = Instant::now();
+        let elapsed = now.duration_since(state.last_refill).as_secs_f64();
+        if elapsed > 0.0 {
+            state.tokens = (state.tokens + state.cfg.refill_per_sec * elapsed).min(state.cfg.capacity);
+            state.last_refill = now;
+        }
+        if state.tokens >= n as f64 { 0 }
+        else {
+            let need = n as f64 - state.tokens;
+            if state.cfg.refill_per_sec <= 0.0 { u64::MAX }
+            else { ((need / state.cfg.refill_per_sec) * 1000.0).ceil() as u64 }
+        }
+    } else { 0 }
+}
+
 /// Set a default rate limit used for collections without explicit config.
 pub fn set_default_rate_limit(capacity: u64, refill_per_sec: u64) {
     *TELEMETRY.default_rate.write() = Some(TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill_per_sec as f64 });

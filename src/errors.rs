@@ -52,4 +52,10 @@ pub enum DbError {
 
     #[error("rate-limited")]
     RateLimited,
+
+    #[error("rate-limited; retry-after-ms: {retry_after_ms}")]
+    RateLimitedWithRetry { retry_after_ms: u64 },
+
+    #[error("feature not implemented: {0}")]
+    FeatureNotImplemented(String),
 }

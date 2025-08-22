@@ -459,7 +459,8 @@ pub fn count_docs(col: &Arc<Collection>, filter: &Filter) -> usize {
 pub fn find_docs_rate_limited(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> Result<Cursor, DbError> {
     if telemetry::would_limit(&col.name_str(), 1) {
         telemetry::log_rate_limited(&col.name_str(), "find");
-        return Err(DbError::RateLimited);
+    let ra = telemetry::retry_after_ms(&col.name_str(), 1);
+    return Err(DbError::RateLimitedWithRetry { retry_after_ms: ra });
     }
     Ok(find_docs(col, filter, opts))
 }
@@ -467,7 +468,8 @@ pub fn find_docs_rate_limited(col: &Arc<Collection>, filter: &Filter, opts: &Fin
 pub fn count_docs_rate_limited(col: &Arc<Collection>, filter: &Filter) -> Result<usize, DbError> {
     if telemetry::would_limit(&col.name_str(), 1) {
         telemetry::log_rate_limited(&col.name_str(), "count");
-        return Err(DbError::RateLimited);
+    let ra = telemetry::retry_after_ms(&col.name_str(), 1);
+    return Err(DbError::RateLimitedWithRetry { retry_after_ms: ra });
     }
     Ok(count_docs(col, filter))
 }

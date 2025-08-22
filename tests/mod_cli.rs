@@ -59,7 +59,10 @@ async fn test_cli_telemetry_rate_limit() {
         Ok(_) => panic!("expected rate limited error"),
         Err(e) => {
             if let Some(db) = e.downcast_ref::<DbError>() {
-                assert!(matches!(db, DbError::RateLimited));
+                match db {
+                    DbError::RateLimited | DbError::RateLimitedWithRetry { .. } => {},
+                    _ => panic!("unexpected db error: {}", db),
+                }
             } else {
                 panic!("unexpected error type: {}", e);
             }

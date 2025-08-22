@@ -27,5 +27,9 @@ fn api_returns_rate_limited_error() {
     let res1 = api::count(&engine, &col.name_str(), &filter);
     assert!(res1.is_ok());
     let res2 = api::count(&engine, &col.name_str(), &filter);
-    assert!(matches!(res2, Err(nexus_lite::errors::DbError::RateLimited)));
+    match res2 {
+    Err(nexus_lite::errors::DbError::RateLimitedWithRetry { retry_after_ms: _ }) => {},
+        Err(nexus_lite::errors::DbError::RateLimited) => {},
+        other => panic!("unexpected: {:?}", other),
+    }
 }

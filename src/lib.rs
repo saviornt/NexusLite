@@ -8,6 +8,7 @@ pub mod crypto;
 pub mod document;
 pub mod engine;
 pub mod errors;
+pub mod feature_flags;
 pub mod export;
 pub mod import;
 pub mod query;

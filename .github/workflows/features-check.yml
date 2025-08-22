@@ -1,0 +1,19 @@
+name: Features Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --quiet
+      - name: Run features print
+        run: cargo run --quiet --bin nexuslite -- features-print
+      - name: Run features check
+        run: cargo run --quiet --bin nexuslite -- features-check

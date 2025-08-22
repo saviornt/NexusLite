@@ -40,6 +40,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Import/Export with the WASP engine directly:
 
+## Feature Flags
+
+Runtime feature flags let you toggle experimental or gated functionality without recompiling.
+
+- crypto-pqc: Post-quantum cryptography (ML-KEM, SPHINCS+).
+  - Status: not currently available; stub for future work. Any attempt to use PQC helpers returns a "feature not implemented" error.
+
+CLI commands:
+
+- feature-list — list all flags and their status
+- feature-enable `name` — enable a flag (note: enabling crypto-pqc still errors until implemented)
+- feature-disable `name` — disable a flag
+
+Programmatic API:
+
+- `api::feature_list() -> Vec<FeatureFlagInfo>`
+- `api::feature_set(name, enabled) -> Result<(), DbError>`
+- `api::feature_get(name) -> Option<FeatureFlagInfo>`
+
+Info output includes compiled features (Cargo) and runtime flags:
+
+- compiled_features: e.g., `regex`
+- runtime_flags: name, enabled, description (e.g., crypto-ecc=true, crypto-pqc=false)
+
+CLI quick checks:
+
+```powershell
+# Print package version, compiled features, and runtime flags
+nexuslite features-print
+
+# Fail (non-zero) if any unexpected runtime flags are present
+nexuslite features-check
+```
+
+CI
+
+- A workflow at `.github/workflows/features-check.yml` runs `features-print` and `features-check` on pushes/PRs.
+
 ```rust
 use nexus_lite::engine::Engine;
 use nexus_lite::import::{import_file, ImportOptions, ImportFormat};

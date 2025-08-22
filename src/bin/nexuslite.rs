@@ -384,6 +384,17 @@ enum Commands {
         #[arg(help = "Refill tokens per second")]
         refill_per_sec: u64,
     },
+    // Feature flags
+    #[command(name = "feature-list", about = "List feature flags and their status")]
+    FeatureList,
+    #[command(name = "feature-enable", about = "Enable a runtime feature flag (note: 'crypto-pqc' is not currently available; stub only)")]
+    FeatureEnable { #[arg(help = "Feature flag name (e.g., crypto-pqc)")] name: String },
+    #[command(name = "feature-disable", about = "Disable a runtime feature flag")]
+    FeatureDisable { #[arg(help = "Feature flag name")] name: String },
+    #[command(name = "features-print", about = "Print package, compiled features, and runtime flags")] 
+    FeaturesPrint,
+    #[command(name = "features-check", about = "Fail if unknown runtime flags are present")]
+    FeaturesCheck,
 }
 
 fn ensure_engine(db_override: &Option<PathBuf>, cfg: &AppConfig) -> Result<Engine, Box<dyn std::error::Error>> {
@@ -458,6 +469,11 @@ fn main() {
         }
             res
         },
+    Commands::FeatureList => prog_cli::run(&engine, prog_cli::Command::FeatureList),
+    Commands::FeatureEnable { name } => prog_cli::run(&engine, prog_cli::Command::FeatureEnable { name: name.clone() }),
+    Commands::FeatureDisable { name } => prog_cli::run(&engine, prog_cli::Command::FeatureDisable { name: name.clone() }),
+    Commands::FeaturesPrint => prog_cli::run(&engine, prog_cli::Command::FeaturesPrint),
+    Commands::FeaturesCheck => prog_cli::run(&engine, prog_cli::Command::FeaturesCheck),
         Commands::CloseDb { path } => prog_cli::run(&engine, prog_cli::Command::DbClose { db_path: path }),
         Commands::ColCreate { name } => prog_cli::run(&engine, prog_cli::Command::ColCreate { name }),
         Commands::ColDelete { name } => prog_cli::run(&engine, prog_cli::Command::ColDelete { name }),
@@ -547,6 +563,17 @@ fn main() {
                 }
             }
             eprintln!("totals: ephemeral={}, persistent={}", ephemeral_total, persistent_total);
+            // Show compiled features and runtime flags
+            let report = nexus_lite::api::info(&engine);
+            if !report.compiled_features.is_empty() {
+                println!("compiled_features: {}", report.compiled_features.join(","));
+            } else {
+                println!("compiled_features: <none>");
+            }
+            if !report.runtime_flags.is_empty() {
+                println!("runtime_flags:");
+                for f in report.runtime_flags { println!("  {}\tenabled={}\t{}", f.name, f.enabled, f.description); }
+            }
             Ok(())
         }
         Commands::Doctor => {
@@ -697,5 +724,23 @@ fn main() {
             Ok(())
         }
     };
-    if let Err(e) = r { eprintln!("error: {}", e); std::process::exit(1); }
+    if let Err(e) = r {
+        // Pretty rate-limit message
+        if let Some(db) = e.downcast_ref::<nexus_lite::errors::DbError>() {
+            match db {
+                nexus_lite::errors::DbError::RateLimitedWithRetry { retry_after_ms } => {
+                    eprintln!("rate-limited; retry-after-ms={}", retry_after_ms);
+                    std::process::exit(2);
+                }
+                nexus_lite::errors::DbError::RateLimited => {
+                    eprintln!("rate-limited");
+                    std::process::exit(2);
+                }
+                _ => { eprintln!("error: {}", db); std::process::exit(1); }
+            }
+        } else {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }

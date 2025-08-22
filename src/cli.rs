@@ -54,6 +54,13 @@ pub enum Command {
     DecryptDbPbe { db_path: PathBuf, username: String },
     /// Verify .db.sig and .wasp.sig using a public key PEM; prints results.
     VerifyDbSigs { db_path: PathBuf, key_pub_pem: String },
+    // Feature Flags
+    FeatureList,
+    FeatureEnable { name: String },
+    FeatureDisable { name: String },
+    // Feature checks/print
+    FeaturesPrint,
+    FeaturesCheck,
 }
 
 fn parse_format_input(s: &Option<String>) -> Option<String> { s.as_ref().map(|x| x.to_lowercase()) }
@@ -142,7 +149,8 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             let col = engine.get_collection(&collection).ok_or_else(|| crate::errors::DbError::NoSuchCollection(collection.clone()))?;
             if crate::telemetry::would_limit(&col.name_str(), 1) {
                 crate::telemetry::log_rate_limited(&collection, "find");
-                return Err(Box::new(DbError::RateLimited));
+                let ra = crate::telemetry::retry_after_ms(&col.name_str(), 1);
+                return Err(Box::new(DbError::RateLimitedWithRetry { retry_after_ms: ra }));
             }
             let filter = query::parse_filter_json(&filter_json)?;
             let mut opts = FindOptions::default();
@@ -169,7 +177,8 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             let col = engine.get_collection(&collection).ok_or_else(|| crate::errors::DbError::NoSuchCollection(collection.clone()))?;
             if crate::telemetry::would_limit(&col.name_str(), 1) {
                 crate::telemetry::log_rate_limited(&collection, "find");
-                return Err(Box::new(DbError::RateLimited));
+                let ra = crate::telemetry::retry_after_ms(&col.name_str(), 1);
+                return Err(Box::new(DbError::RateLimitedWithRetry { retry_after_ms: ra }));
             }
             let filter = query::parse_filter_json(&filter_json)?;
             let mut opts = FindOptions::default();
@@ -202,7 +211,8 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             let col = engine.get_collection(&collection).ok_or_else(|| crate::errors::DbError::NoSuchCollection(collection.clone()))?;
             if crate::telemetry::would_limit(&col.name_str(), 1) {
                 crate::telemetry::log_rate_limited(&collection, "count");
-                return Err(Box::new(DbError::RateLimited));
+                let ra = crate::telemetry::retry_after_ms(&col.name_str(), 1);
+                return Err(Box::new(DbError::RateLimitedWithRetry { retry_after_ms: ra }));
             }
             let filter = query::parse_filter_json(&filter_json)?;
             let n = query::count_docs(&col, &filter);
@@ -377,6 +387,39 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
                 failed = true;
             }
             if failed { Err("signature verification failed".into()) } else { Ok(()) }
+        }
+        Command::FeatureList => {
+            let list = crate::api::feature_list();
+            for f in list { println!("{}\tenabled={}\t{}", f.name, f.enabled, f.description); }
+            Ok(())
+        }
+        Command::FeatureEnable { name } => {
+            crate::feature_flags::ensure("crypto-pqc", false, "Post-quantum cryptography (ML-KEM, SPHINCS+). Not currently available; stub for future work.");
+            crate::api::feature_set(&name, true)?;
+            println!("feature {}=enabled", name);
+            Ok(())
+        }
+        Command::FeatureDisable { name } => {
+            crate::api::feature_set(&name, false)?;
+            println!("feature {}=disabled", name);
+            Ok(())
+        }
+        Command::FeaturesPrint => {
+            let engine = Engine::new(std::env::temp_dir().join("nexuslite_features.wal")).map_err(|e| format!("engine: {e}"))?;
+            let report = crate::api::info(&engine);
+            println!("package: {} {}", report.package_name, report.package_version);
+            println!("compiled_features: {}", if report.compiled_features.is_empty() { "<none>".into() } else { report.compiled_features.join(",") });
+            println!("runtime_flags:");
+            for f in report.runtime_flags { println!("  {}\tenabled={}\t{}", f.name, f.enabled, f.description); }
+            Ok(())
+        }
+        Command::FeaturesCheck => {
+            // Accept only known flags; fail if an unexpected flag appears in the registry
+            let known = ["crypto-pqc", "crypto-ecc", "open-metrics", "regex", "cli-bin"];
+            let list = crate::api::feature_list();
+            let mut unknown: Vec<String> = Vec::new();
+            for f in list { if !known.contains(&f.name.as_str()) { unknown.push(f.name); } }
+            if unknown.is_empty() { Ok(()) } else { Err(format!("unknown feature flags: {}", unknown.join(",")).into()) }
         }
     }
 }

@@ -7,6 +7,11 @@ use std::path::PathBuf;
 use crate::document::{Document, DocumentType};
 use std::path::Path;
 use std::io::{self, Write, IsTerminal};
+// Build-time generated list of compiled features
+#[allow(dead_code)]
+mod built {
+    include!(concat!(env!("OUT_DIR"), "/compiled_features.rs"));
+}
 
 // Programmatic API: thin helpers intended for embedding (e.g., via FFI/Python)
 
@@ -145,6 +150,10 @@ pub struct InfoReport {
     pub collections: Vec<CollectionInfo>,
     pub total_ephemeral: usize,
     pub total_persistent: usize,
+    pub compiled_features: Vec<String>,
+    pub runtime_flags: Vec<FeatureFlagInfo>,
+    pub package_name: String,
+    pub package_version: String,
 }
 
 pub fn info(engine: &Engine) -> InfoReport {
@@ -161,7 +170,18 @@ pub fn info(engine: &Engine) -> InfoReport {
             out.push(CollectionInfo { name: name.clone(), docs: docs.len(), ephemeral: e, persistent: p, cache_hits: m.hits, cache_misses: m.misses, indexes: idx });
         }
     }
-    InfoReport { collections: out, total_ephemeral: total_e, total_persistent: total_p }
+    // Compiled features: from build script output
+    let compiled = built::COMPILED_FEATURES.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let runtime = feature_list();
+    InfoReport {
+        collections: out,
+        total_ephemeral: total_e,
+        total_persistent: total_p,
+        compiled_features: compiled,
+        runtime_flags: runtime,
+        package_name: env!("CARGO_PKG_NAME").to_string(),
+        package_version: env!("CARGO_PKG_VERSION").to_string(),
+    }
 }
 
 // --- Crypto helpers (optional usage) ---
@@ -286,3 +306,20 @@ pub fn telemetry_remove_rate_limit(collection: &str) { crate::telemetry::remove_
 
 /// Set default per-collection rate limit used when not explicitly configured.
 pub fn telemetry_set_default_rate_limit(capacity: u64, refill_per_sec: u64) { crate::telemetry::set_default_rate_limit(capacity, refill_per_sec); }
+
+// --- Feature Flags API ---
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FeatureFlagInfo { pub name: String, pub enabled: bool, pub description: String }
+
+pub fn feature_list() -> Vec<FeatureFlagInfo> {
+    crate::feature_flags::list().into_iter().map(|f| FeatureFlagInfo { name: f.name, enabled: f.enabled, description: f.description }).collect()
+}
+
+pub fn feature_set(name: &str, enabled: bool) -> Result<(), DbError> {
+    if crate::feature_flags::set(name, enabled) { Ok(()) } else { Err(DbError::QueryError(format!("unknown feature flag: {name}"))) }
+}
+
+pub fn feature_get(name: &str) -> Option<FeatureFlagInfo> {
+    crate::feature_flags::get(name).map(|f| FeatureFlagInfo { name: f.name, enabled: f.enabled, description: f.description })
+}

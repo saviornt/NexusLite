@@ -398,6 +398,19 @@ cargo clippy -q --all-targets --all-features -- -D warnings
     - Insert/Update/Delete emit audit records via `telemetry::log_audit`; off by default, toggle with `telemetry::set_audit_enabled(true)`.
   - [x] Query logging with user/session metadata (hook; user optional)
   - [x] Extra hardening (e.g., input validation, output encoding, regex timeouts)
+
+### Sprint 6 - Feature Flags (runtime)
+
+- Added a minimal runtime feature flag registry (`feature_flags` module) exposed via API and CLI.
+- Initial flag: `crypto-pqc` — Post-quantum cryptography (ML-KEM, SPHINCS+).
+  - Description: Not currently available; stub for future work.
+  - Behavior: Any attempt to use PQC helpers returns a "feature not implemented" error. Enabling the flag does not activate functionality yet; it's reserved for future implementation.
+- CLI:
+  - `feature-list`
+  - `feature-enable <name>`
+  - `feature-disable <name>`
+- API:
+  - `feature_list`, `feature_set`, `feature_get`
     - Regex remains feature-gated with length guards; timeouts best-effort via existing query deadline.
   - [x] Query timeouts and max result size enforcement
   - [x] Add Prometheus/OpenMetrics export (optional feature) for cache/engine/query stats
@@ -409,10 +422,10 @@ cargo clippy -q --all-targets --all-features -- -D warnings
   - [x] Tests pass across the suite; added hooks are covered indirectly by existing query/write tests; no behavior regressions.
   - [x] Updated documentation as needed.
 
-- [ ] Feature flags
-  - [ ] Publish supported feature flags: `crypto-ecc`, `crypto-pqc` (future), `prometheus` or `open-metrics`, `regex`, `cli-bin`
-  - [ ] Document supported build combinations (MVP build matrix) and deny unknown features in CI
-  - [ ] Expose compiled feature flags in `db info` and document them in mdBook/Rustdoc
+- [x] Feature flags
+  - [x] Publish supported runtime flags: `crypto-ecc`, `crypto-pqc` (stub), `open-metrics`, `regex` (mirrors Cargo feature), `cli-bin`
+  - [x] Document supported build combinations (MVP build matrix) and deny unknown features in CI
+  - [x] Expose compiled features and runtime flags in `info` output; document in README
 
 - [ ] Code Security, Supply Chain, and Fuzzing and property tests (again)
   - [ ] Perform code security checks
@@ -450,6 +463,8 @@ cargo clippy -q --all-targets --all-features -- -D warnings
   - [ ] Cache performance metrics
   - [ ] WASP recovery time tracking
   - [ ] Any other relevant metrics
+
+- [x] Perform sanity-check of feature flags, the `cli`, `api`, `bin/nexuslite` and `feature_flags` modules.
 
 - [ ] Finalize repo for use as a Rust crate, including:
   - [ ] Add `nexuslite` as a dependency in `Cargo.toml`.
@@ -837,3 +852,9 @@ Notes
 
 - To continue past bad rows and log them, set `iopts.skip_errors = true` and `iopts.error_sidecar = Some("events.errors.jsonl".into())`.
 - Pandas reads exported NDJSON via `pd.read_json('export/events.jsonl', lines=True)`.
+
+CLI helpers:
+
+- `nexuslite features-print` — show package/version, compiled features, runtime flags
+- `nexuslite features-check` — exit non-zero if unknown runtime flags are present
+- CI: `.github/workflows/features-check.yml` runs the above on push/PR
