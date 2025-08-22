@@ -15,9 +15,10 @@ pub struct ExportOptions {
     pub format: ExportFormat,
     pub csv: CsvOptions,
     pub temp_suffix: String,
+    pub redact_fields: Option<Vec<String>>, // optional list of top-level fields to mask
 }
 impl Default for ExportOptions {
-    fn default() -> Self { Self { format: ExportFormat::Ndjson, csv: CsvOptions::default(), temp_suffix: ".tmp".to_string() } }
+    fn default() -> Self { Self { format: ExportFormat::Ndjson, csv: CsvOptions::default(), temp_suffix: ".tmp".to_string(), redact_fields: None } }
 }
 
 #[derive(Debug, Default)]
@@ -49,11 +50,14 @@ pub fn export_to_writer(engine: &Engine, collection: &str, path: impl AsRef<Path
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
     let mut report = ExportReport::default();
+    let redact = opts.redact_fields.as_ref().map(|v| v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
     match opts.format {
         ExportFormat::Ndjson => {
             log::debug!("export ndjson start");
             for d in col.get_all_documents() {
-                let v = bson::to_bson(&d.data.0).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let mut doc = d.data.0.clone();
+                if let Some(fields) = &redact { apply_redaction(&mut doc, fields); }
+                let v = bson::to_bson(&doc).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 let s = serde_json::to_string(&v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(writer, "{}", s)?;
                 report.written += 1;
@@ -73,7 +77,12 @@ pub fn export_to_writer(engine: &Engine, collection: &str, path: impl AsRef<Path
                     headers = d.data.0.keys().cloned().collect();
                     if opts.csv.write_headers { wtr.write_record(&headers)?; }
                 }
-                let row: Vec<String> = headers.iter().map(|k| d.data.0.get(k).map(bson_to_string).unwrap_or_default()).collect();
+                let row: Vec<String> = headers.iter().map(|k| {
+                    if let Some(fields) = &redact {
+                        if fields.iter().any(|f| f == k) { return "***REDACTED***".to_string(); }
+                    }
+                    d.data.0.get(k).map(bson_to_string).unwrap_or_default()
+                }).collect();
                 wtr.write_record(&row)?;
                 report.written += 1;
             }
@@ -100,5 +109,13 @@ fn bson_to_string(v: &bson::Bson) -> String {
         bson::Bson::Double(f) => f.to_string(),
         bson::Bson::Boolean(b) => b.to_string(),
         other => other.to_string(),
+    }
+}
+
+fn apply_redaction(doc: &mut bson::Document, fields: &[String]) {
+    for f in fields {
+        if doc.contains_key(f) {
+            doc.insert(f, bson::Bson::String("***REDACTED***".into()));
+        }
     }
 }

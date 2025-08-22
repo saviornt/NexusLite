@@ -62,9 +62,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Logging
+## Logging
 
-- Database-scoped logs are written automatically to a folder named after the DB stem, e.g., for mydb.db logs go to `mydb_logs/nexuslite.log`.
+- Database-scoped logs are written automatically to a folder named after the DB stem, e.g., for mydb.db logs go to `mydb_logs/mydb.log`.
   You don’t need to call a global logger init; it’s handled during `Database::open`.
 
 ## WASP storage engine (default)
@@ -128,12 +128,6 @@ nexuslite shell
 #   config
 #   exit
 ```
-
----
-
-## Testing matrix
-
-The following tests validate major features:
 
 - Cache (TTL/LRU/LFU, metrics, sweeper): `tests/mod_cache.rs`
 - Collections CRUD + index create/drop: `tests/mod_collection.rs`, `tests/mod_index.rs`
@@ -474,6 +468,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   };
   let docs = db.find("users", &filter, &opts)?.to_vec();
   assert_eq!(docs.len(), 1);
+  # then type commands like:
+    help
+    list-collections
 
   // Count
   let count = db.count("users", &filter)?;
@@ -491,6 +488,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("deleted={}", del.deleted);
   Ok(())
 }
+```
+
+### Export redaction
+
+Mask sensitive fields while exporting:
+
+```powershell
+nexuslite export mycoll out.ndjson --redact password,token,ssn
+```
+
+### Cryptography commands
+
+Key generation, sign/verify, and file encryption/decryption are available:
+
+```powershell
+# Generate a P-256 keypair (PEM files)
+nexuslite crypto-keygen --out-priv priv.pem --out-pub pub.pem
+
+# Sign and verify
+nexuslite crypto-sign priv.pem input.bin --out-sig sig.der
+nexuslite crypto-verify pub.pem input.bin sig.der
+
+# Encrypt/decrypt files (ECDH P-256 + AES-256-GCM)
+nexuslite crypto-encrypt pub.pem input.db output.enc
+nexuslite crypto-decrypt priv.pem output.enc output.dec
+
+# Encrypted DB checkpoint and restore
+nexuslite checkpoint-encrypted mydb.db pub.pem mydb.enc
+nexuslite restore-encrypted mydb.db priv.pem mydb.enc
 ```
 
 JSON parsing helpers
@@ -517,3 +543,20 @@ Notes
   - Encrypt snapshots, WAL, and per-collection files.
   - Sign persisted data to ensure integrity.
 - Add Vector Map Indexing for searching through collections and documents
+
+## Post-Quantum Cryptography (PQC) roadmap and alignment
+
+NexusLite uses modern ECC (P-256) today for file encryption (via ECDH+HKDF→AES-256-GCM) and ECDSA for signatures. To prepare for PQC:
+
+- Target KEMs: ML-KEM (Kyber) families for hybrid key exchange. Plan: a hybrid ECDH(P-256)+ML-KEM shared secret, HKDF to AES-256-GCM keys.
+- Target signatures: SPHINCS+ for long-lived artifact signatures, with optional Ed25519/P-256 fallback during transition.
+- Feature flags: `crypto-pqc` to opt-in; hybrid mode default when enabled. Pure-PQC mode is an experimental build.
+- Artifacts in scope: encrypted checkpoints, `.db`/`.wasp` at-rest encryption, and `.db.sig`/`.wasp.sig` alongside.
+- Validation: interop tests using `pqcrypto-mlkem` and `pqcrypto-sphincsplus` vectors; round-trips and tamper tests.
+- Timeline: stage 1 (API stubs and feature-flagged builds), stage 2 (hybrid encryption for checkpoints), stage 3 (optional at-rest PQC), stage 4 (PQC signatures for release artifacts).
+
+Security posture alignment
+
+- Hard-fail vs warn policy for signature checks is configurable (`open-db --verify-sig [--sig-warn]`).
+- PBE flow: on open, if `.db`/`.wasp` are PBE-wrapped, NexusLite requires `NEXUSLITE_USERNAME` and `NEXUSLITE_PASSWORD` to decrypt before opening.
+- Config secrets hygiene: doctor/info avoid printing credential-like values; prefer environment variables.

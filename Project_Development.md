@@ -309,16 +309,16 @@ Future features will always build on stable, well-tested foundations.
 
   Notes: As part of hardening, remaining uses of `.unwrap()`/`.expect()` in runtime paths were removed or isolated behind guaranteed-safe constructs. CLI now propagates errors instead of panicking.
 
-- [ ] Cryptography (optional features)
-  - [ ] ECC-256 encryption (key/Pair) and ECDSA signature verification
-    - [ ] ECC-256 based encryption for database files.
-  - [ ] ECDSA signature verification for database files.
-  - [ ] Add CLI/API option to redact or mask sensitive fields in logs and exports.
-  - [ ] Implement support for `secret fields` (e.g., user-based passwords using `bcrypt`/`argon2`) that will salt and hash field values. These field values will not be queryable (no equality joins on hashed values)
-  - [ ] PQC roadmap alignment (ml-kem, sphincs+) as future work
-  - [ ] Add PQC code stub to the `crypto` module for future integration.
-  - [ ] Create tests for encryption/decryption, including if username/passwords and key/pairs or signature verification do not match.
-  - [ ] Update project documentation and README documentation.
+- [x] Cryptography (optional features)
+  - [x] ECC-256 encryption (key/Pair) and ECDSA signature verification
+    - [x] ECC-256 based encryption for files (ECDH + AES-256-GCM) with header
+  - [x] ECDSA signature verification for files
+  - [x] Add API helper to hash secret fields in documents (argon2id)
+  - [x] Add CLI option to redact or mask sensitive fields in exports; doctor masks secrets in config/env.
+  - [x] PQC roadmap alignment (ml-kem, sphincs+) documented (see PQC section below)
+  - [x] Add PQC code stub to the `crypto` module for future integration.
+  - [x] Create tests for keygen/sign/verify, encrypt/decrypt, and hashing
+  - [x] Update project documentation and README with CLI crypto commands and export redaction.
 
 - [ ] Code security and supply-chain
   - [ ] `cargo audit` + `cargo deny` in CI; fail on vulnerable/yanked deps
@@ -336,6 +336,8 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Concurrency tests (basic loom model or stress tests) for lock ordering
   - [ ] Cursor-based iteration in core paths to avoid large clones
   - [ ] Optional sanitizer/miri runs in CI where feasible (nightly job)
+  - [ ] Ensure that the codebase is highly optimized and free of unnecessary allocations.
+  - [ ] Ensure that thread / CPU concurrency and asynchronous file I/O is being used properly to ensure optimal performance and reliability.
 
 - [ ] File I/O safety
   - [ ] Use `tempfile::NamedTempFile` for atomic writes (avoid symlink races)
@@ -379,7 +381,7 @@ Future features will always build on stable, well-tested foundations.
 
 ---
 
-## Sprint 7: Benchmarks (Optional Feature)
+## Sprint 7: Benchmarks (Optional Feature) & MVP
 
 - [ ] Create the necessary hooks within the database engine to support benchmarking. Tests should include, but not be limited to:
   - [ ] Query execution time tracking
@@ -398,7 +400,7 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Add `nexuslite` as a dependency in `Cargo.toml`.
   - [ ] Ensure all public APIs are documented and tested.
   - [ ] Ensure all features are properly gated with feature flags.
-  - [ ] Ensure the code is well-structured and follows Rust conventions.
+  - [ ] Ensure the code and comments are well-structured and follows Rust conventions.
   - [ ] Ensure the code is well-tested and has good test coverage.
   - [ ] Ensure the code is well-documented and has good documentation.
 
@@ -408,6 +410,7 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Go
   - [ ] C and C++
   - [ ] Rust
+  - [ ] Binary executable
 
 ---
 
@@ -498,6 +501,41 @@ nexus_lite
 │   └── mod_wasp.rs
 ├── .gitignore
 ├── Cargo.lock
+└── README.md
+---
+
+## Modules (alignment)
+
+Below is a quick reference for the modules and their current responsibilities.
+
+- api.rs: Embedding-friendly helpers for DB open/new/close, CRUD, import/export, info report, and crypto helpers (ECC, PBE, encrypted checkpoint/restore, DB encrypt/decrypt).
+- cache.rs: In-memory hybrid TTL-first + LRU cache with sweeper and metrics.
+- cli.rs: Programmatic CLI dispatcher used by the binary; houses commands for import/export/query, admin, crypto, PBE DB toggles, and a signature verify helper.
+- collection.rs: Collection abstraction managing documents, indexes, and cache wiring.
+- crypto.rs: ECC (P-256) keygen/sign/verify; ECDH+HKDF→AES-256-GCM file crypto; Argon2id secret hashing; PBE (Argon2id→AES-256-GCM). PQC stubs included.
+- document.rs: BSON-backed Document with metadata (type, timestamps, TTL) and helpers.
+- engine.rs: Orchestrates collections and the storage backend (default WASP).
+- errors.rs: thiserror-based `DbError` with IO/domain variants.
+- export.rs: Streaming export (CSV/NDJSON/BSON) with redaction; Windows-safe atomic writes.
+- import.rs: Streaming import (CSV/NDJSON/BSON) with auto-detect, sidecar errors, and TTL mapping.
+- index.rs: Index descriptors, metadata persistence, versioning, and rebuild-on-mismatch.
+- lib.rs: User-facing Database API and global engine/registry helpers.
+- logger.rs: Scoped logger initialization next to DB with log4rs.
+- query.rs: Typed filter/update engine with projection/sort/pagination; optional regex.
+- types.rs: Core types (DocumentId, ops enums, metadata structures).
+- wal.rs: Append-only WAL for benchmarking and historical engine.
+- wasp.rs: Default storage engine (Write-Ahead Shadow-Paging) with CoW tree, WAL integration, segments, and compaction.
+
+---
+
+## PQC roadmap and alignment
+
+- Goals: Add hybrid PQC support while maintaining ECC paths. Keep crypto optional via feature flags and minimize public surface changes.
+- KEM: Integrate ML-KEM (Kyber) via `pqcrypto-mlkem` for hybrid key exchange alongside P-256 ECDH; derive AEAD keys via HKDF.
+- Signatures: Integrate SPHINCS+ via `pqcrypto-sphincsplus` for artifact/database signatures next to ECDSA.
+- Phasing: start with encrypted checkpoint hybrid, then optional at-rest hybrid for `.db`/`.wasp`, then PQC signatures for `.sig` files.
+- Tests: add vectors, round-trip, and tamper tests under `crypto-pqc` feature; CI matrix includes ECC-only and hybrid.
+- Policy: signature enforcement selectable (warn vs hard-fail) in CLI and config; defaults conservative.
 ├── Cargo.toml
 └── Project_Development.md
 ```

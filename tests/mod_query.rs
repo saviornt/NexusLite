@@ -49,3 +49,16 @@ fn find_sort_project_paginate() {
     let cnt = count_docs(&&col, &Filter::Cmp { path: "age".into(), op: CmpOp::Gt, value: 30.into() });
     assert_eq!(cnt, 2);
 }
+
+#[test]
+fn test_query_find_redaction() {
+    use nexus_lite::engine::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::new(dir.path().join("wal.log")).unwrap();
+    let col = engine.create_collection("users".into());
+    let id = col.insert_document(nexus_lite::document::Document::new(doc!{"user":"alice","password":"secret"}, nexus_lite::document::DocumentType::Persistent));
+    assert!(col.find_document(&id).is_some());
+    // Use programmatic CLI path to emit NDJSON with redaction
+    let _ = nexus_lite::cli::run(&engine, nexus_lite::cli::Command::QueryFindR { collection: "users".into(), filter_json: "{}".into(), project: None, sort: None, limit: None, skip: None, redact_fields: Some(vec!["password".into()]) });
+    // We don't capture stdout here, but ensure no panic and path compiles.
+}

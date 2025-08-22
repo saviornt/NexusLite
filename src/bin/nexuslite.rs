@@ -4,12 +4,15 @@ use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use nexus_lite::document::DocumentType;
 use std::collections::VecDeque;
+use std::io::{IsTerminal, Write};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AppConfig {
     db_path: Option<PathBuf>,
     log_config: Option<PathBuf>,
     default_collection: Option<String>,
+    // Signature verification policy: "warn" or "fail"
+    sig_policy: Option<String>,
 }
 
 fn load_config(cli_cfg: Option<PathBuf>) -> AppConfig {
@@ -33,6 +36,7 @@ fn load_config(cli_cfg: Option<PathBuf>) -> AppConfig {
                     if cfg.db_path.is_none() { cfg.db_path = file_cfg.db_path; }
                     if cfg.log_config.is_none() { cfg.log_config = file_cfg.log_config; }
                     if cfg.default_collection.is_none() { cfg.default_collection = file_cfg.default_collection; }
+                    if cfg.sig_policy.is_none() { cfg.sig_policy = file_cfg.sig_policy; }
                 }
             }
         }
@@ -46,6 +50,9 @@ fn load_config(cli_cfg: Option<PathBuf>) -> AppConfig {
     }
     if cfg.default_collection.is_none() {
         if let Ok(s) = std::env::var("NEXUSLITE_DEFAULT_COLLECTION") { cfg.default_collection = Some(s); }
+    }
+    if cfg.sig_policy.is_none() {
+        if let Ok(s) = std::env::var("NEXUSLITE_SIG_POLICY") { cfg.sig_policy = Some(s); }
     }
     cfg
 }
@@ -116,7 +123,13 @@ enum Commands {
     #[command(name = "open-db", about = "Open an existing database and initialize the engine")]
     OpenDb {
         #[arg(help = "Database file path to open (e.g., mydb.db)")]
-        path: PathBuf
+    path: PathBuf,
+    #[arg(long, help = "Verify .db.sig and .wasp.sig with the provided public key")]
+    verify_sig: bool,
+    #[arg(long, requires = "verify_sig", help = "Path to ECDSA P-256 public key PEM for signature verification")]
+    pubkey: Option<PathBuf>,
+    #[arg(long, requires = "verify_sig", help = "Treat signature failures as warnings instead of errors")]
+    sig_warn: bool,
     },
     #[command(name = "close-db", about = "Close/unregister a previously opened database handle")]
     CloseDb {
@@ -159,7 +172,9 @@ enum Commands {
         #[arg(help = "Path to output file")]
         file: PathBuf,
         #[arg(help = "Format: ndjson|csv|bson; defaults to ndjson")]
-        format: Option<String>
+    format: Option<String>,
+    #[arg(long, value_delimiter = ',', help = "Comma-separated list of top-level fields to redact/mask in outputs (NDJSON/CSV)")]
+    redact: Option<Vec<String>>,
     },
     // Query
     #[command(about = "Find documents matching a filter; prints NDJSON to stdout")]
@@ -175,7 +190,9 @@ enum Commands {
         #[arg(help = "Limit results")]
         limit: Option<usize>,
         #[arg(help = "Skip N results")]
-        skip: Option<usize>
+    skip: Option<usize>,
+    #[arg(long, value_delimiter = ',', help = "Comma-separated list of top-level fields to redact in output")]
+    redact: Option<Vec<String>>,
     },
     #[command(about = "Count documents matching a filter")]
     Count {
@@ -243,6 +260,82 @@ enum Commands {
     Doctor,
     #[command(name = "shell", about = "Start an interactive NexusLite shell (REPL)")]
     Shell,
+    // Crypto
+    #[command(name = "crypto-keygen", about = "Generate a P-256 ECDSA keypair (PEM)")]
+    CryptoKeygenP256 {
+        #[arg(long, help = "Write private key PEM to this path; stdout if omitted")]
+        out_priv: Option<PathBuf>,
+        #[arg(long, help = "Write public key PEM to this path; stdout if omitted")]
+        out_pub: Option<PathBuf>,
+    },
+    #[command(name = "crypto-sign", about = "Sign a file using ECDSA P-256 (DER signature)")]
+    CryptoSignFile {
+        #[arg(help = "Path to private key PEM")]
+        key_priv: PathBuf,
+        #[arg(help = "Input file to sign")]
+        input: PathBuf,
+        #[arg(long, help = "Write signature bytes to this file; prints hex to stdout if omitted")]
+        out_sig: Option<PathBuf>,
+    },
+    #[command(name = "crypto-verify", about = "Verify a file signature (ECDSA P-256 DER)")]
+    CryptoVerifyFile {
+        #[arg(help = "Path to public key PEM")]
+        key_pub: PathBuf,
+        #[arg(help = "Input file to verify")]
+        input: PathBuf,
+        #[arg(help = "Path to signature bytes (DER)")]
+        sig: PathBuf,
+    },
+    #[command(name = "crypto-encrypt", about = "Encrypt a file using ECDH(P-256)+AES-256-GCM")]
+    CryptoEncryptFile {
+        #[arg(help = "Recipient public key PEM")]
+        key_pub: PathBuf,
+        #[arg(help = "Input file")]
+        input: PathBuf,
+        #[arg(help = "Output encrypted file")]
+        output: PathBuf,
+    },
+    #[command(name = "crypto-decrypt", about = "Decrypt a file using ECDH(P-256)+AES-256-GCM")]
+    CryptoDecryptFile {
+        #[arg(help = "Recipient private key PEM")]
+        key_priv: PathBuf,
+        #[arg(help = "Input encrypted file")]
+        input: PathBuf,
+        #[arg(help = "Output decrypted file")]
+        output: PathBuf,
+    },
+    #[command(name = "checkpoint-encrypted", about = "Create an encrypted DB snapshot using recipient public key")]
+    CheckpointEncrypted {
+        #[arg(help = "Path to DB .db file")]
+        db_path: PathBuf,
+        #[arg(help = "Recipient public key PEM path")]
+        key_pub: PathBuf,
+        #[arg(help = "Output encrypted snapshot file")]
+        output: PathBuf,
+    },
+    #[command(name = "restore-encrypted", about = "Restore DB from an encrypted snapshot using recipient private key")]
+    RestoreEncrypted {
+        #[arg(help = "Path to DB .db file to write")]
+        db_path: PathBuf,
+        #[arg(help = "Recipient private key PEM path")]
+        key_priv: PathBuf,
+        #[arg(help = "Input encrypted snapshot file")]
+        input: PathBuf,
+    },
+    #[command(name = "encrypt-db", about = "Encrypt an existing DB (.db and .wasp) with username/password (env NEXUSLITE_PASSWORD)")]
+    EncryptDbPbe {
+        #[arg(help = "Path to DB .db file")]
+        db_path: PathBuf,
+        #[arg(help = "Username to bind to the encryption header")]
+        username: String,
+    },
+    #[command(name = "decrypt-db", about = "Decrypt a PBE-encrypted DB (.db and .wasp) with username/password (env NEXUSLITE_PASSWORD)")]
+    DecryptDbPbe {
+        #[arg(help = "Path to DB .db file")]
+        db_path: PathBuf,
+        #[arg(help = "Username used during encryption")]
+        username: String,
+    },
 }
 
 fn ensure_engine(db_override: &Option<PathBuf>, cfg: &AppConfig) -> Result<Engine, Box<dyn std::error::Error>> {
@@ -267,7 +360,63 @@ fn main() {
 
     let r = match cli.command {
         Commands::NewDb { path } => prog_cli::run(&engine, prog_cli::Command::DbCreate { db_path: path }),
-        Commands::OpenDb { path } => prog_cli::run(&engine, prog_cli::Command::DbOpen { db_path: path }),
+        Commands::OpenDb { path, verify_sig, pubkey, sig_warn } => {
+            fn read_line_stdin() -> String { let mut s = String::new(); let _ = std::io::stdin().read_line(&mut s); if s.ends_with('\n') { s.pop(); if s.ends_with('\r') { s.pop(); } } s }
+            // If DB/WASP are PBE-encrypted, ensure we have credentials; prompt if interactive terminal.
+            let wasp_path = path.with_extension("wasp");
+            let pbe_db = nexus_lite::crypto::pbe_is_encrypted(&path);
+            let pbe_wasp = wasp_path.exists() && nexus_lite::crypto::pbe_is_encrypted(&wasp_path);
+            let mut res: Result<(), Box<dyn std::error::Error>> = Ok(());
+            if pbe_db || pbe_wasp {
+                let mut username = std::env::var("NEXUSLITE_USERNAME").unwrap_or_default();
+                let mut password = std::env::var("NEXUSLITE_PASSWORD").unwrap_or_default();
+                if (username.is_empty() || password.is_empty()) && std::io::stdin().is_terminal() {
+                    if username.is_empty() { eprint!("Username: "); let _ = std::io::stderr().flush(); username = read_line_stdin(); }
+                    if password.is_empty() { password = rpassword::prompt_password("Password: ").unwrap_or_default(); }
+                }
+                if username.is_empty() || password.is_empty() {
+                    res = Err("PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD or run interactively".into());
+                }
+                if res.is_ok() {
+                    if let Err(e) = nexus_lite::api::decrypt_db_with_password(&path.as_path(), &username, &password) {
+                        res = Err(e.into());
+                    }
+                }
+            }
+            if res.is_ok() {
+                res = prog_cli::run(&engine, prog_cli::Command::DbOpen { db_path: path.clone() });
+            }
+            if res.is_ok() && verify_sig {
+                if let Some(pk) = pubkey {
+                    if let Ok(pub_pem) = std::fs::read_to_string(&pk) {
+                        let wasp = path.with_extension("wasp");
+                        let db_sig = path.with_extension("db.sig");
+                        let wasp_sig = wasp.with_extension("wasp.sig");
+                        let mut failed = false;
+                        if db_sig.exists() {
+                            if let Ok(sig) = std::fs::read(&db_sig) {
+                                if nexus_lite::api::crypto_verify_file(&pub_pem, &path, &sig).unwrap_or(false) == false {
+                                    eprintln!("SIGNATURE VERIFICATION FAILED: {}", path.display());
+                                    failed = true;
+                                }
+                            }
+                        }
+                        if wasp.exists() && wasp_sig.exists() {
+                            if let Ok(sig) = std::fs::read(&wasp_sig) {
+                                if nexus_lite::api::crypto_verify_file(&pub_pem, &wasp, &sig).unwrap_or(false) == false {
+                                    eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
+                                    failed = true;
+                                }
+                            }
+                        }
+                        // Determine policy: CLI flag overrides config; default is fail
+                        let warn = if sig_warn { true } else { matches!(cfg.sig_policy.as_deref(), Some("warn")) };
+                        if failed && !warn { res = Err("signature verification failed".into()); }
+                    }
+                }
+            }
+            res
+        },
         Commands::CloseDb { path } => prog_cli::run(&engine, prog_cli::Command::DbClose { db_path: path }),
         Commands::ColCreate { name } => prog_cli::run(&engine, prog_cli::Command::ColCreate { name }),
         Commands::ColDelete { name } => prog_cli::run(&engine, prog_cli::Command::ColDelete { name }),
@@ -277,13 +426,13 @@ fn main() {
             let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::Import { collection: c, file, format })
         }
-        Commands::Export { collection, file, format } => {
+        Commands::Export { collection, file, format, redact } => {
             let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
-            prog_cli::run(&engine, prog_cli::Command::Export { collection: c, file, format })
+            if let Some(fields) = redact { prog_cli::run(&engine, prog_cli::Command::ExportR { collection: c, file, format, redact_fields: Some(fields) }) } else { prog_cli::run(&engine, prog_cli::Command::Export { collection: c, file, format }) }
         }
-        Commands::Find { collection, filter, project, sort, limit, skip } => {
+        Commands::Find { collection, filter, project, sort, limit, skip, redact } => {
             let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
-            prog_cli::run(&engine, prog_cli::Command::QueryFind { collection: c, filter_json: filter, project, sort, limit, skip })
+            if let Some(fields) = redact { prog_cli::run(&engine, prog_cli::Command::QueryFindR { collection: c, filter_json: filter, project, sort, limit, skip, redact_fields: Some(fields) }) } else { prog_cli::run(&engine, prog_cli::Command::QueryFind { collection: c, filter_json: filter, project, sort, limit, skip }) }
         }
         Commands::Count { collection, filter } => {
             let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
@@ -323,6 +472,15 @@ fn main() {
         }
         Commands::ListEphemeral => prog_cli::run(&engine, prog_cli::Command::ListEphemeral),
         Commands::PurgeEphemeral { all } => prog_cli::run(&engine, prog_cli::Command::PurgeEphemeral { all }),
+    Commands::CryptoKeygenP256 { out_priv, out_pub } => prog_cli::run(&engine, prog_cli::Command::CryptoKeygenP256 { out_priv, out_pub }),
+    Commands::CryptoSignFile { key_priv, input, out_sig } => prog_cli::run(&engine, prog_cli::Command::CryptoSignFile { key_priv, input, out_sig }),
+    Commands::CryptoVerifyFile { key_pub, input, sig } => prog_cli::run(&engine, prog_cli::Command::CryptoVerifyFile { key_pub, input, sig }),
+    Commands::CryptoEncryptFile { key_pub, input, output } => prog_cli::run(&engine, prog_cli::Command::CryptoEncryptFile { key_pub, input, output }),
+    Commands::CryptoDecryptFile { key_priv, input, output } => prog_cli::run(&engine, prog_cli::Command::CryptoDecryptFile { key_priv, input, output }),
+    Commands::CheckpointEncrypted { db_path, key_pub, output } => prog_cli::run(&engine, prog_cli::Command::CheckpointEncrypted { db_path, key_pub, output }),
+    Commands::RestoreEncrypted { db_path, key_priv, input } => prog_cli::run(&engine, prog_cli::Command::RestoreEncrypted { db_path, key_priv, input }),
+    Commands::EncryptDbPbe { db_path, username } => prog_cli::run(&engine, prog_cli::Command::EncryptDbPbe { db_path, username }),
+    Commands::DecryptDbPbe { db_path, username } => prog_cli::run(&engine, prog_cli::Command::DecryptDbPbe { db_path, username }),
         Commands::Info => {
             // Print basic stats; for now, collection names and cache metrics
             let names = engine.list_collection_names();
