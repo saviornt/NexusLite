@@ -1,0 +1,38 @@
+name: Security and Lints
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 3 * * 1'  # Mondays at 03:00 UTC
+
+jobs:
+  security:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install tools
+        run: |
+          cargo install cargo-audit --force
+          cargo install cargo-deny --force
+      - name: Cargo audit
+        run: cargo audit --deny warnings
+      - name: Cargo deny (bans/licenses/sources)
+        run: cargo deny check --all-features
+      - name: Clippy (pedantic + nursery; deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery
+      - name: Rustfmt check
+        run: cargo fmt --all -- --check

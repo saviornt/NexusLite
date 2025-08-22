@@ -1,0 +1,39 @@
+[package]
+name = "nexuslite-fuzz"
+edition = "2021"
+publish = false
+version = "0.0.0"
+
+[package.metadata]
+fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.nexus_lite]
+path = ".."
+features = []
+
+[[bin]]
+name = "fuzz_filter_parser"
+path = "fuzz_targets/fuzz_filter_parser.rs"
+
+autobins = false
+
+[[bin]]
+name = "fuzz_update_parser"
+path = "fuzz_targets/fuzz_update_parser.rs"
+
+[[bin]]
+name = "fuzz_eval"
+path = "fuzz_targets/fuzz_eval.rs"
+
+[[bin]]
+name = "fuzz_ndjson_import"
+path = "fuzz_targets/fuzz_ndjson_import.rs"
+
+[[bin]]
+name = "fuzz_csv_import"
+path = "fuzz_targets/fuzz_csv_import.rs"
+

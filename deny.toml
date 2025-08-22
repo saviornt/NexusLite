@@ -1,0 +1,22 @@
+[advisories]
+denylists = ["unmaintained", "yanked", "notice", "unsound"]
+denies = ["vulnerability"]
+
+[bans]
+deny = [
+  # Example: { name = "some-crate", version = "*" }
+]
+
+[licenses]
+# Allow OSI-approved licenses
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-3-Clause",
+  "BSD-2-Clause",
+  "ISC",
+  "Unicode-DFS-2016"
+]
+
+[sources]
+allow-git = false

@@ -849,15 +849,17 @@ pub struct BlockAllocator {
 }
 
 impl BlockAllocator {
+	#[must_use]
 	pub fn new() -> Self {
-		BlockAllocator { free_pages: BTreeSet::new(), next_page: 1 }
+		Self { free_pages: BTreeSet::new(), next_page: 1 }
 	}
 	/// Construct allocator from persisted manifest allocator fields
+	#[must_use]
 	pub fn from_manifest(m: &Manifest) -> Self {
 		let mut free = BTreeSet::new();
 		for &p in &m.free_pages { free.insert(p); }
 		let next = if m.next_page_id == 0 { 1 } else { m.next_page_id };
-		BlockAllocator { free_pages: free, next_page: next }
+		Self { free_pages: free, next_page: next }
 	}
 	/// Export allocator state into the manifest for durability
 	pub fn export_to_manifest(&self, m: &mut Manifest) {
@@ -894,8 +896,9 @@ pub struct Manifest {
 }
 
 impl Manifest {
+	#[must_use]
 	pub fn new() -> Self {
-		Manifest {
+		Self {
 			version: 1,
 			root_page_id: 0,
 			active_segments: vec![],
@@ -906,14 +909,19 @@ impl Manifest {
 	}
 }
 
+impl Default for Manifest {
+	fn default() -> Self { Self::new() }
+}
+
 // === End CoW B-tree section ===
 
 /// Pluggable storage interface for write-append logs used by the engine.
 /// Implementations must be Send + Sync to be shared across threads.
+#[allow(clippy::missing_errors_doc)]
 pub trait StorageEngine: Send + Sync {
 	fn append(&mut self, operation: &Operation) -> io::Result<()>;
 	fn read_all(&self) -> io::Result<Vec<Result<Operation, bincode::error::DecodeError>>>;
-	fn checkpoint_with_meta(&mut self, _db_path: &PathBuf, _indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> { Ok(()) }
+	fn checkpoint_with_meta(&mut self, _db_path: &std::path::Path, _indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> { Ok(()) }
 	fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 	fn append_index_delta(&mut self, _delta: IndexDelta) -> io::Result<()> { Ok(()) }
 	fn read_index_deltas(&self) -> io::Result<Vec<IndexDelta>> { Ok(vec![]) }
@@ -932,7 +940,6 @@ impl Wasp {
 			.create(true)
 			.append(true)
 			.read(true)
-			.write(true)
 			.open(path)?;
 		Ok(Self { file })
 	}
@@ -940,7 +947,8 @@ impl Wasp {
 	/// Checkpoint: merge the WASP append log into the main database file.
 	/// This rewrites the database file with all operations applied, compacts the log, and updates the manifest.
 	/// Rewrite the append log into a compacted DB snapshot file and atomically replace it.
-	pub fn checkpoint(&mut self, db_path: &PathBuf) -> io::Result<()> {
+	#[allow(clippy::missing_errors_doc)]
+	pub fn checkpoint(&mut self, db_path: &std::path::Path) -> io::Result<()> {
 		use std::io::{Seek, SeekFrom, Write, Read};
 		// 1. Read all operations from WASP log
 		self.file.flush()?;
@@ -997,8 +1005,9 @@ impl Wasp {
 		Ok(())
 	}
 
-	/// Checkpoint with index metadata: write a DbSnapshot containing (optional) operations and index descriptors.
-	pub fn checkpoint_with_meta(&mut self, db_path: &PathBuf, indexes: std::collections::HashMap<String, Vec<IndexDescriptor>>) -> io::Result<()> {
+	/// Checkpoint with index metadata: write a `DbSnapshot` containing (optional) operations and index descriptors.
+	#[allow(clippy::missing_errors_doc)]
+	pub fn checkpoint_with_meta(&mut self, db_path: &std::path::Path, indexes: std::collections::HashMap<String, Vec<IndexDescriptor>>) -> io::Result<()> {
 		// Keep this lightweight and robust on Windows: skip scanning the WASP log and just persist index metadata.
 		let snapshot = DbSnapshot { version: 1, operations: Vec::new(), indexes };
 		let encoded = encode_to_vec(&snapshot, standard())
@@ -1044,10 +1053,11 @@ pub struct DbSnapshot {
 }
 
 impl StorageEngine for Wasp {
+	#[allow(clippy::missing_errors_doc)]
 	fn append(&mut self, operation: &Operation) -> io::Result<()> {
 	// Wrap as frame and encode
 	let frame = WaspFrame::Op(operation.clone());
-	let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+	let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::other(e))?;
 	// length-prefixed frame
 	self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
 	self.file.write_all(&encoded)?;
@@ -1055,6 +1065,7 @@ impl StorageEngine for Wasp {
 		self.file.flush()
 	}
 
+	#[allow(clippy::missing_errors_doc)]
 	fn read_all(&self) -> io::Result<Vec<Result<Operation, bincode::error::DecodeError>>> {
 		let mut file = self.file.try_clone()?;
 		file.seek(io::SeekFrom::Start(0))?;
@@ -1065,7 +1076,10 @@ impl StorageEngine for Wasp {
 		let mut offset = 0usize;
 		while offset + 8 <= buffer.len() {
 			let len_bytes = &buffer[offset..offset + 8];
-			let len = match <&[u8; 8]>::try_from(len_bytes) { Ok(arr) => u64::from_be_bytes(*arr) as usize, Err(_) => break };
+			let len = match <&[u8; 8]>::try_from(len_bytes) {
+				Ok(arr) => match usize::try_from(u64::from_be_bytes(*arr)) { Ok(v) => v, Err(_) => break },
+				Err(_) => break,
+			};
 			offset += 8;
 			if offset + len > buffer.len() {
 				break;
@@ -1083,20 +1097,23 @@ impl StorageEngine for Wasp {
 		Ok(operations)
 	}
 
-	fn checkpoint_with_meta(&mut self, db_path: &PathBuf, indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> {
+	#[allow(clippy::missing_errors_doc)]
+	fn checkpoint_with_meta(&mut self, db_path: &std::path::Path, indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> {
 		self.checkpoint_with_meta(db_path, indexes)
 	}
 
 	fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 
+	#[allow(clippy::missing_errors_doc)]
 	fn append_index_delta(&mut self, delta: IndexDelta) -> io::Result<()> {
 		let frame = WaspFrame::Idx(delta);
-		let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+		let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::other(e))?;
 		self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
 		self.file.write_all(&encoded)?;
 		self.file.flush()
 	}
 
+	#[allow(clippy::missing_errors_doc)]
 	fn read_index_deltas(&self) -> io::Result<Vec<IndexDelta>> {
 		let mut file = self.file.try_clone()?;
 		file.seek(io::SeekFrom::Start(0))?;
@@ -1106,7 +1123,10 @@ impl StorageEngine for Wasp {
 		let mut offset = 0usize;
 		while offset + 8 <= buffer.len() {
 			let len_bytes = &buffer[offset..offset + 8];
-			let len = match <&[u8; 8]>::try_from(len_bytes) { Ok(arr) => u64::from_be_bytes(*arr) as usize, Err(_) => break };
+			let len = match <&[u8; 8]>::try_from(len_bytes) {
+				Ok(arr) => match usize::try_from(u64::from_be_bytes(*arr)) { Ok(v) => v, Err(_) => break },
+				Err(_) => break,
+			};
 			offset += 8;
 			if offset + len > buffer.len() { break; }
 			let encoded = &buffer[offset..offset + len];
@@ -1120,14 +1140,14 @@ impl StorageEngine for Wasp {
 // Make the existing WAL conform to the pluggable StorageEngine trait
 impl StorageEngine for crate::wal::Wal {
 	fn append(&mut self, operation: &Operation) -> io::Result<()> {
-		crate::wal::Wal::append(self, operation)
+		Self::append(self, operation)
 	}
 
 	fn read_all(&self) -> io::Result<Vec<Result<Operation, bincode::error::DecodeError>>> {
-		crate::wal::Wal::read_all(self)
+		Self::read_all(self)
 	}
 
-	fn checkpoint_with_meta(&mut self, _db_path: &PathBuf, _indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> {
+	fn checkpoint_with_meta(&mut self, _db_path: &std::path::Path, _indexes: std::collections::HashMap<String, Vec<crate::index::IndexDescriptor>>) -> io::Result<()> {
 		Ok(())
 	}
 

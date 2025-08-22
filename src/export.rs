@@ -29,7 +29,7 @@ pub fn export_file(engine: &Engine, collection: &str, path: impl AsRef<Path>, op
     let p = path.as_ref();
     let tmp = tmp_path(p, &opts.temp_suffix);
     let report = export_to_writer(engine, collection, &tmp, opts)?;
-    // Try atomic replace; fallback to replace-by-rename
+    // Try replace-by-rename within same dir; remove target if it exists first
     if p.exists() { let _ = fs::remove_file(p); }
     fs::rename(&tmp, p)?;
     Ok(report)
@@ -50,13 +50,13 @@ pub fn export_to_writer(engine: &Engine, collection: &str, path: impl AsRef<Path
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
     let mut report = ExportReport::default();
-    let redact = opts.redact_fields.as_ref().map(|v| v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    let redact = opts.redact_fields.as_ref();
     match opts.format {
         ExportFormat::Ndjson => {
             log::debug!("export ndjson start");
             for d in col.get_all_documents() {
                 let mut doc = d.data.0.clone();
-                if let Some(fields) = &redact { apply_redaction(&mut doc, fields); }
+                if let Some(fields) = redact { apply_redaction(&mut doc, fields); }
                 let v = bson::to_bson(&doc).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 let s = serde_json::to_string(&v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 writeln!(writer, "{}", s)?;
@@ -78,7 +78,7 @@ pub fn export_to_writer(engine: &Engine, collection: &str, path: impl AsRef<Path
                     if opts.csv.write_headers { wtr.write_record(&headers)?; }
                 }
                 let row: Vec<String> = headers.iter().map(|k| {
-                    if let Some(fields) = &redact {
+                    if let Some(fields) = redact {
                         if fields.iter().any(|f| f == k) { return "***REDACTED***".to_string(); }
                     }
                     d.data.0.get(k).map(bson_to_string).unwrap_or_default()

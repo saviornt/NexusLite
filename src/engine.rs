@@ -199,7 +199,7 @@ impl Engine {
     }
 
     /// Persist a checkpoint of data and index metadata into the main DB file when using WASP.
-    pub fn checkpoint_with_indexes(&self, db_path: &PathBuf) -> std::io::Result<()> {
+    pub fn checkpoint_with_indexes(&self, db_path: &std::path::Path) -> std::io::Result<()> {
         // Collect index descriptors per collection
         let mut map: HashMap<String, Vec<IndexDescriptor>> = HashMap::new();
         for (name, col) in self.collections.read().iter() {
@@ -207,7 +207,7 @@ impl Engine {
             map.insert(name.clone(), mgr.descriptors());
         }
         // Delegate to storage engine
-        self.storage.write().checkpoint_with_meta(db_path, map)
+    self.storage.write().checkpoint_with_meta(db_path, map)
     }
 }
 

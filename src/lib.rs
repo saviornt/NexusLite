@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod api;
 pub mod cache;
 pub mod cli;
@@ -15,6 +17,7 @@ pub mod wal;
 pub mod wasp;
 pub mod index;
 
+
 use crate::collection::Collection;
 use crate::document::Document;
 use crate::engine::Engine;
@@ -22,6 +25,7 @@ use crate::errors::DbError;
 use crate::types::DocumentId;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use bincode::serde::decode_from_slice;
 use bincode::config::standard;
 use std::path::PathBuf;
@@ -51,12 +55,12 @@ impl Database {
         // Create the WASP file if it doesn't exist
         if !wasp_path.exists() {
             std::fs::File::create(&wasp_path)
-                .map_err(|e| DbError::Io(format!("Failed to create WASP file: {}", e)))?;
+                .map_err(|e| DbError::Io(format!("Failed to create WASP file: {e}")))?;
         }
 
         // Initialize logging next to DB: {db_dir}/{db_stem}_logs/{db_stem}.log
         if let Some(stem) = db_path.file_stem().and_then(|s| s.to_str()) {
-            let base = db_path.parent().unwrap_or(std::path::Path::new("."));
+            let base = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
             let _ = crate::logger::init_for_db_in(base, stem);
         }
 
@@ -69,11 +73,9 @@ impl Database {
         // If a snapshot exists in the .db file, load index descriptors and ensure indexes exist
         if let Ok(bytes) = std::fs::read(db_path) {
             if let Ok((snap, _)) = decode_from_slice::<crate::wasp::DbSnapshot, _>(&bytes, standard()) {
-                for (cname, descs) in snap.indexes.iter() {
+                for (cname, descs) in &snap.indexes {
                     let col = engine_arc.get_collection(cname).unwrap_or_else(|| engine_arc.create_collection(cname.clone()));
-                    for d in descs {
-                        col.create_index(&d.field, d.kind);
-                    }
+                    for d in descs { col.create_index(&d.field, d.kind); }
                 }
             }
         }
@@ -84,7 +86,7 @@ impl Database {
             .unwrap_or("nexuslite")
             .to_string();
 
-    let db = Database { engine: engine_arc.clone(), name };
+    let db = Self { engine: engine_arc.clone(), name };
         // Register as opened
         register_db(&db_path_buf, &engine_arc);
         Ok(db)
@@ -103,11 +105,11 @@ impl Database {
         // Create the WASP file if it doesn't exist
         if !wasp_path.exists() {
             std::fs::File::create(&wasp_path)
-                .map_err(|e| DbError::Io(format!("Failed to create WASP file: {}", e)))?;
+                .map_err(|e| DbError::Io(format!("Failed to create WASP file: {e}")))?;
         }
         // Initialize logging next to DB: {db_dir}/{db_stem}_logs/{db_stem}.log
         if let Some(stem) = db_path.file_stem().and_then(|s| s.to_str()) {
-            let base = db_path.parent().unwrap_or(std::path::Path::new("."));
+            let base = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
             let _ = crate::logger::init_for_db_in(base, stem);
         }
         let engine = Engine::with_wasp(wasp_path)
@@ -116,7 +118,7 @@ impl Database {
         crate::register_engine(&engine_arc);
         if let Ok(bytes) = std::fs::read(db_path) {
             if let Ok((snap, _)) = decode_from_slice::<crate::wasp::DbSnapshot, _>(&bytes, standard()) {
-                for (cname, descs) in snap.indexes.iter() {
+                for (cname, descs) in &snap.indexes {
                     let col = engine_arc.get_collection(cname).unwrap_or_else(|| engine_arc.create_collection(cname.clone()));
                     for d in descs { col.create_index(&d.field, d.kind); }
                 }
@@ -127,7 +129,7 @@ impl Database {
             .and_then(|s| s.to_str())
             .unwrap_or("nexuslite")
             .to_string();
-    let db = Database { engine: engine_arc.clone(), name };
+    let db = Self { engine: engine_arc.clone(), name };
         register_db(&db_path_buf, &engine_arc);
         Ok(db)
     }
@@ -211,10 +213,9 @@ impl Database {
         Ok(crate::query::delete_one(&col, filter))
     }
 
-    /// Checkpoint: write a snapshot embedding index descriptors into the main .db file, then truncate .wasp
+    /// Checkpoint: write a snapshot embedding index descriptors into the main `.db` file, then truncate `.wasp`
     pub fn checkpoint(&self, filepath: &Path) -> Result<(), DbError> {
-        let db_path = filepath;
-        self.engine.checkpoint_with_indexes(&db_path.to_path_buf()).map_err(|e| DbError::Io(e.to_string()))
+        self.engine.checkpoint_with_indexes(filepath).map_err(|e| DbError::Io(e.to_string()))
     }
 
     /// Returns the logical database name.
@@ -236,15 +237,11 @@ pub fn init() -> Result<(), Box<dyn std::error::Error>> {
     logger::init()?;
     Ok(())
 }
-
-use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use std::sync::Weak;
 
-lazy_static! {
-    static ref ENGINE_WEAK: RwLock<Option<Weak<engine::Engine>>> = RwLock::new(None);
-    static ref DB_REGISTRY: RwLock<HashMap<String, Weak<engine::Engine>>> = RwLock::new(HashMap::new());
-}
+static ENGINE_WEAK: LazyLock<RwLock<Option<Weak<engine::Engine>>>> = LazyLock::new(|| RwLock::new(None));
+static DB_REGISTRY: LazyLock<RwLock<HashMap<String, Weak<engine::Engine>>>> = LazyLock::new(|| RwLock::new(HashMap::new()));
 
 #[allow(dead_code)]
 pub fn register_engine(engine: &Arc<engine::Engine>) {
@@ -267,12 +264,12 @@ fn normalize_db_path(name_or_path: Option<&str>) -> PathBuf {
     if pb.is_absolute() { pb } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(pb) }
 }
 
-fn register_db(path: &PathBuf, engine: &Arc<engine::Engine>) {
+fn register_db(path: &Path, engine: &Arc<engine::Engine>) {
     let key = path.to_string_lossy().to_string();
     DB_REGISTRY.write().insert(key, Arc::downgrade(engine));
 }
 
-fn unregister_db(path: &PathBuf) -> bool {
+fn unregister_db(path: &Path) -> bool {
     let key = path.to_string_lossy().to_string();
     DB_REGISTRY.write().remove(&key).is_some()
 }

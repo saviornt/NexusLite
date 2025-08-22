@@ -129,6 +129,33 @@ nexuslite shell
 #   exit
 ```
 
+### Encrypted open (PBE) and signature verification
+
+If your `.db`/`.wasp` are password-based encrypted (PBE), NexusLite will decrypt on open.
+
+- Interactive (TTY): prompts for username and a masked password
+
+```powershell
+# Prompts for Username and Password (masked) if DB is PBE-encrypted
+nexuslite open-db .\\mydb.db
+```
+
+- Non-interactive (CI/scripts): provide credentials via environment variables
+
+```powershell
+$env:NEXUSLITE_USERNAME = 'alice'; $env:NEXUSLITE_PASSWORD = 's3cr3t'; nexuslite open-db .\\mydb.db
+```
+
+- Optional signature verification on open (default policy is config-driven; use --sig-warn to warn instead of fail)
+
+```powershell
+# Hard-fail on bad/missing signatures by default
+nexuslite open-db .\\mydb.db --verify-sig --pubkey .\\pub.pem
+
+# Warn-only
+nexuslite open-db .\\mydb.db --verify-sig --pubkey .\\pub.pem --sig-warn
+```
+
 - Cache (TTL/LRU/LFU, metrics, sweeper): `tests/mod_cache.rs`
 - Collections CRUD + index create/drop: `tests/mod_collection.rs`, `tests/mod_index.rs`
 - Query (filters, projection, sort, pagination): `tests/mod_query.rs`
@@ -171,7 +198,7 @@ flowchart TD
 The following is the current project structure, subject to change:
 
 ```text
-nexus_lite
+NexusLite
 ├── src\
 │   ├── api.rs
 │   ├── cache.rs
@@ -183,15 +210,19 @@ nexus_lite
 │   ├── errors.rs
 │   ├── export.rs
 │   ├── import.rs
+│   ├── index.rs
 │   ├── lib.rs
 │   ├── logger.rs
+│   ├── query.rs
 │   ├── types.rs
-│   └── wal.rs
+│   ├── wal.rs
+│   └── wasp.rs
 ├── tests\
 │   ├── common\
 │   │   └── test_logger.rs
 │   ├── integration.rs
 │   ├── mod_api.rs
+│   ├── mod_cache.rs
 │   ├── mod_cli.rs
 │   ├── mod_collection.rs
 │   ├── mod_crypto.rs
@@ -200,10 +231,15 @@ nexus_lite
 │   ├── mod_errors.rs
 │   ├── mod_export.rs
 │   ├── mod_import.rs
+│   ├── mod_index.rs
 │   ├── mod_lib.rs
-│   ├── mod_logger.rs
+│   ├── mod_paths.rs
+│   ├── mod_query.rs
+│   ├── mod_query_features.rs
+│   ├── mod_snapshot.rs
 │   ├── mod_types.rs
-│   └── mod_wal.rs
+│   ├── mod_wal.rs
+│   └── mod_wasp.rs
 ├── .gitignore
 ├── Cargo.lock
 ├── Cargo.toml
@@ -533,6 +569,7 @@ Notes
 - $regex is behind the Cargo feature flag "regex". When enabled, only safe-length patterns (<= 512 chars) are accepted.
 - FindOptions::timeout_ms cancels long scans on a best-effort basis.
 - Logs are written to `{db_name}_logs/nexuslite.log` when opening a database.
+- Projection semantics: when `FindOptions.projection` is set, returned documents contain only the requested fields (sorting is applied before projection).
 
 ## Future Enhancements
 

@@ -340,7 +340,7 @@ enum Commands {
 
 fn ensure_engine(db_override: &Option<PathBuf>, cfg: &AppConfig) -> Result<Engine, Box<dyn std::error::Error>> {
     // Use WASP-backed engine by default when a db was specified; else fallback to WAL-in-temp for quick usage
-    if let Some(db) = db_override.as_ref().or(cfg.db_path.as_ref()) {
+    if let Some(db) = db_override.as_ref().or_else(|| cfg.db_path.as_ref()) {
         let wasp = db.with_extension("wasp");
         Engine::with_wasp(wasp)
     } else {
@@ -395,7 +395,7 @@ fn main() {
                         let mut failed = false;
                         if db_sig.exists() {
                             if let Ok(sig) = std::fs::read(&db_sig) {
-                                if nexus_lite::api::crypto_verify_file(&pub_pem, &path, &sig).unwrap_or(false) == false {
+                                if !nexus_lite::api::crypto_verify_file(&pub_pem, &path, &sig).unwrap_or(false) {
                                     eprintln!("SIGNATURE VERIFICATION FAILED: {}", path.display());
                                     failed = true;
                                 }
@@ -403,14 +403,14 @@ fn main() {
                         }
                         if wasp.exists() && wasp_sig.exists() {
                             if let Ok(sig) = std::fs::read(&wasp_sig) {
-                                if nexus_lite::api::crypto_verify_file(&pub_pem, &wasp, &sig).unwrap_or(false) == false {
+                                if !nexus_lite::api::crypto_verify_file(&pub_pem, &wasp, &sig).unwrap_or(false) {
                                     eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
                                     failed = true;
                                 }
                             }
                         }
                         // Determine policy: CLI flag overrides config; default is fail
-                        let warn = if sig_warn { true } else { matches!(cfg.sig_policy.as_deref(), Some("warn")) };
+                        let warn = sig_warn || matches!(cfg.sig_policy.as_deref(), Some("warn"));
                         if failed && !warn { res = Err("signature verification failed".into()); }
                     }
                 }
@@ -423,27 +423,27 @@ fn main() {
         Commands::ColList => prog_cli::run(&engine, prog_cli::Command::ColList),
         Commands::ColRename { old, new } => prog_cli::run(&engine, prog_cli::Command::ColRename { old, new }),
         Commands::Import { collection, file, format } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::Import { collection: c, file, format })
         }
         Commands::Export { collection, file, format, redact } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             if let Some(fields) = redact { prog_cli::run(&engine, prog_cli::Command::ExportR { collection: c, file, format, redact_fields: Some(fields) }) } else { prog_cli::run(&engine, prog_cli::Command::Export { collection: c, file, format }) }
         }
         Commands::Find { collection, filter, project, sort, limit, skip, redact } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             if let Some(fields) = redact { prog_cli::run(&engine, prog_cli::Command::QueryFindR { collection: c, filter_json: filter, project, sort, limit, skip, redact_fields: Some(fields) }) } else { prog_cli::run(&engine, prog_cli::Command::QueryFind { collection: c, filter_json: filter, project, sort, limit, skip }) }
         }
         Commands::Count { collection, filter } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::QueryCount { collection: c, filter_json: filter })
         }
         Commands::Update { collection, filter, update } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::QueryUpdate { collection: c, filter_json: filter, update_json: update })
         }
         Commands::Delete { collection, filter } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::QueryDelete { collection: c, filter_json: filter })
         }
         Commands::UpdateOne { collection, filter, update } => {
@@ -502,7 +502,7 @@ fn main() {
         }
         Commands::Doctor => {
             // Basic fs checks; try to open db path if provided
-            if let Some(db) = cli.db.clone().or(cfg.db_path.clone()) {
+            if let Some(db) = cli.db.clone().or_else(|| cfg.db_path.clone()) {
                 let wasp = db.with_extension("wasp");
                 let ok = std::fs::OpenOptions::new().read(true).write(true).create(true).open(&wasp).is_ok();
                 println!("wasp_access:{} path:{}", ok, wasp.display());

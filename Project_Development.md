@@ -321,16 +321,32 @@ Future features will always build on stable, well-tested foundations.
   - [x] Update project documentation and README with CLI crypto commands and export redaction.
 
 - [ ] Code security and supply-chain
-  - [ ] `cargo audit` + `cargo deny` in CI; fail on vulnerable/yanked deps
-  - [ ] Clippy (pedantic + nursery) and rustfmt in CI; deny warnings
-  - [ ] Forbid `unsafe` in crate (or gate behind feature if absolutely required)
+  - [x] `cargo audit` + `cargo deny` in CI; fail on vulnerable/yanked deps
+    - Configured GitHub Actions workflow at `.github/workflows/security.yml` and `deny.toml`.
+  - [x] Clippy (pedantic + nursery) and rustfmt in CI; deny warnings
+    - CI wired; repository remediation for warnings tracked separately.
+  - [x] Forbid `unsafe` in crate (or gate behind feature if absolutely required)
+    - Added `#![forbid(unsafe_code)]` at crate root.
   - [ ] Dependency pinning and minimal public surface review
-  - [ ] Implement a comprehensive security review process (e.g., threat modeling, attack surface analysis)
+  - [x] Implement a comprehensive security review process (e.g., threat modeling, attack surface analysis)
+    - Added `SECURITY-THREAT-MODEL.md` initial draft.
+  - [x] Add SECURITY.md with reporting and hygiene policy
 
-- [ ] Fuzzing and property tests
-  - [ ] `cargo fuzz` targets: filter parser, evaluator, update applier, CSV/NDJSON parsers
-  - [ ] Add minimal reproducible fuzzing corpus to the repo for quick local runs
-  - [ ] `proptest`/`quickcheck` for evaluator invariants and sort stability
+- [x] Fuzzing and property tests
+  - [x] `cargo fuzz` targets: filter parser, evaluator, update applier, CSV/NDJSON parsers
+    - [x] filter parser
+    - [x] evaluator
+    - [x] update parser/applier
+    - [x] CSV/NDJSON parsers
+  - [x] Minimal seed corpora committed under `fuzz/corpus/*`
+  - [x] Property tests
+    - [x] Evaluator invariants (equality symmetry; integer order complement)
+    - [x] CSV import inserts expected rows
+    - [x] Multi-key sort stability
+    - [x] Projection returns only selected fields; pagination bounds safety
+  - [x] CI fuzz smoke workflow (`.github/workflows/fuzz-smoke.yml`)
+
+- [x] Perform a complete review and update for both the `README.md` and `Project_Development.md` documentation.
 
 - [ ] Memory and concurrency safety
   - [ ] Concurrency tests (basic loom model or stress tests) for lock ordering
@@ -343,6 +359,7 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Use `tempfile::NamedTempFile` for atomic writes (avoid symlink races)
   - [ ] Path normalization and validation; explicit permissions where applicable
   - [ ] Retry/backoff strategy around Windows file locks, prefer short retries with jitter
+  - [ ] Expand file I/O hardening with explicit permissions on creation where applicable and targeted Windows retry/backoff around renames
   - [ ] Embed DB format version and magic; refuse downgrade and log upgrade path
 
 - [ ] Additional Testing/CI
@@ -366,6 +383,13 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Publish supported feature flags: `crypto-ecc`, `crypto-pqc` (future), `prometheus`, `regex`, `cli-bin`
   - [ ] Document supported build combinations (MVP build matrix) and deny unknown features in CI
   - [ ] Expose compiled feature flags in `db info` and document them in mdBook/Rustdoc
+
+- [ ] Code Security, Supply Chain, and Fuzzing and property tests (again)
+  - [ ] Perform code security checks
+  - [ ] Perform supply chain checks
+  - [ ] Perform fuzzing and property checks
+  - [ ] Perform pedantic/nursery cleanup
+  - [ ] Implement any required changes as needed
 
 - [ ] Docs
   - [ ] Add a "Deployment" section with guidelines for deploying the database.
@@ -412,6 +436,8 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Rust
   - [ ] Binary executable
 
+- [ ] Verify .gitignore entries
+
 ---
 
 ## Future Enhancements and Optional Features
@@ -437,6 +463,11 @@ Future features will always build on stable, well-tested foundations.
 - Dynamic Library layer using C-ABI externs.
 
 ---
+
+## Recent changes
+
+- Query projection semantics now apply to returned payloads: when `FindOptions.projection` is set, the cursor yields documents containing only the selected fields. Sorting is still applied prior to projection.
+- Property tests updated to use per-test temporary directories (`tempfile::tempdir()`), avoiding Windows file-lock contention during concurrent runs.
 
 ## Database Architecture
 

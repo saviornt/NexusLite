@@ -21,6 +21,12 @@ pub enum Order { Asc, Desc }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SortSpec { pub field: String, pub order: Order }
 
+/// Options for `find_docs`.
+///
+/// Semantics:
+/// - When `projection` is `Some(fields)`, the returned documents contain only those fields.
+/// - Sorting is applied before projection.
+/// - Results are sliced by `skip`/`limit` with an internal maximum of `MAX_LIMIT`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FindOptions {
     pub projection: Option<Vec<String>>,
@@ -61,21 +67,35 @@ pub struct UpdateReport { pub matched: u64, pub modified: u64 }
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DeleteReport { pub deleted: u64 }
 
+/// A forward-only cursor over query results.
+///
+/// Note: When available, this cursor holds the materialized result documents (e.g., after
+/// applying projection), avoiding re-fetching from the collection during iteration.
 #[derive(Clone)]
 pub struct Cursor {
     pub collection: Arc<Collection>,
     pub ids: Vec<DocumentId>,
     pub pos: usize,
+    pub docs: Option<Vec<Document>>, // when present, iterate these (e.g., after projection)
 }
 
 impl Cursor {
     pub fn next(&mut self) -> Option<Document> {
+        if let Some(ref docs) = self.docs {
+            if self.pos >= docs.len() { return None; }
+            let d = docs[self.pos].clone();
+            self.pos += 1;
+            return Some(d);
+        }
         if self.pos >= self.ids.len() { return None; }
         let id = self.ids[self.pos].clone();
         self.pos += 1;
         self.collection.find_document(&id)
     }
     pub fn to_vec(mut self) -> Vec<Document> {
+        if let Some(docs) = self.docs.take() {
+            return docs;
+        }
         let mut out = Vec::with_capacity(self.ids.len());
         while let Some(d) = self.next() { out.push(d); }
         out
@@ -271,7 +291,7 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
         }
     }
     let ids = projected.iter().map(|d| d.id.clone()).collect();
-    Cursor { collection: col.clone(), ids, pos: 0 }
+    Cursor { collection: col.clone(), ids, pos: 0, docs: Some(projected) }
 }
 
 fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<DocumentId>> {

@@ -1,12 +1,9 @@
 use chrono::Local;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::sync::Mutex;
-use lazy_static::lazy_static;
+use std::sync::{Mutex, LazyLock};
 
-lazy_static! {
-    static ref LOGGER: Mutex<TestLogger> = Mutex::new(TestLogger::new().unwrap());
-}
+static LOGGER: LazyLock<Mutex<TestLogger>> = LazyLock::new(|| Mutex::new(TestLogger::new().unwrap()));
 
 pub struct TestLogger {
     file: File,

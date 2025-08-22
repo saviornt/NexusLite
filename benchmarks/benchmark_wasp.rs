@@ -1,4 +1,4 @@
-// Run with: cargo run --bin benchmark_wal_vs_wasp
+// Run with: cargo run --bin benchmark_wasp
 // Results saved to benchmarks/results/benchmark_crashStorage_{datetime}.csv
 
 use std::fs::{create_dir_all, File};
