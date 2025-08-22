@@ -3,7 +3,8 @@
 use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
 use hkdf::Hkdf;
 use p256::{ecdsa::{signature::{Signer, Verifier}, Signature, SigningKey, VerifyingKey}, pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey}, PublicKey, SecretKey};
-use rand_core::OsRng;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use sha2::Sha256;
 use std::fs;
 use std::io::{Read, Write};
@@ -35,12 +36,12 @@ pub fn encrypt_file_p256(recipient_pub_pem: &str, input: &std::path::Path, outpu
 	// Derive AES-256 key
 	let hk = Hkdf::<Sha256>::new(None, ikm.as_slice());
 	let mut key = [0u8; 32];
-	hk.expand(b"nexuslite:file:enc", &mut key).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("hkdf: {e}")))?;
-	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("aes key: {e}")))?;
+	hk.expand(b"nexuslite:file:enc", &mut key).map_err(|e| std::io::Error::other(format!("hkdf: {e}")))?;
+	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
 	let mut nonce_bytes = [0u8; 12];
-	getrandom::getrandom(&mut nonce_bytes)?;
+	OsRng.fill_bytes(&mut nonce_bytes);
 	let nonce = Nonce::from_slice(&nonce_bytes);
-	let ct = cipher.encrypt(nonce, pt.as_ref()).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("encrypt: {e}")))?;
+	let ct = cipher.encrypt(nonce, pt.as_ref()).map_err(|e| std::io::Error::other(format!("encrypt: {e}")))?;
 	// Write header + eph pubkey (SEC1 uncompressed) + nonce + ct
 	let mut f = fs::File::create(output)?;
 	f.write_all(MAGIC)?;
@@ -68,10 +69,10 @@ pub fn decrypt_file_p256(recipient_priv_pem: &str, input: &std::path::Path, outp
 	let ikm = shared.raw_secret_bytes();
 	let hk = Hkdf::<Sha256>::new(None, ikm.as_slice());
 	let mut key = [0u8; 32];
-	hk.expand(b"nexuslite:file:enc", &mut key).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("hkdf: {e}")))?;
-	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("aes key: {e}")))?;
+	hk.expand(b"nexuslite:file:enc", &mut key).map_err(|e| std::io::Error::other(format!("hkdf: {e}")))?;
+	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
 	let nonce = Nonce::from_slice(&nonce_bytes);
-	let pt = cipher.decrypt(nonce, ct.as_ref()).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("decrypt: {e}")))?;
+	let pt = cipher.decrypt(nonce, ct.as_ref()).map_err(|e| std::io::Error::other(format!("decrypt: {e}")))?;
 	fs::File::create(output)?.write_all(&pt)?;
 	Ok(())
 }
@@ -93,13 +94,13 @@ pub fn verify_file_p256(pub_pem: &str, input: &std::path::Path, sig_der: &[u8]) 
 /// Hash the specified top-level fields in a BSON document using Argon2id.
 pub fn hash_secret_fields(doc: &mut bson::Document, fields: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
 	let salt: [u8; 16] = {
-		let mut s = [0u8; 16]; getrandom::getrandom(&mut s)?; s
+		let mut s = [0u8; 16]; OsRng.fill_bytes(&mut s); s
 	};
 	let argon = argon2::Argon2::default();
 	for &field in fields {
 		if let Some(bson::Bson::String(s)) = doc.get(field) {
 			let mut out = [0u8; 32];
-			argon.hash_password_into(s.as_bytes(), &salt, &mut out).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("argon2: {e}")))?;
+			argon.hash_password_into(s.as_bytes(), &salt, &mut out).map_err(|e| std::io::Error::other(format!("argon2: {e}")))?;
 			doc.insert(field, bson::Bson::Binary(bson::Binary{subtype: bson::spec::BinarySubtype::Generic, bytes: out.to_vec()}));
 		}
 	}
@@ -122,13 +123,13 @@ impl Default for PbeKdfParams {
 fn derive_pbe_key(username: &str, password: &str, salt: &[u8], params: &PbeKdfParams) -> Result<[u8;32], Box<dyn std::error::Error>> {
 	use argon2::{Argon2, Params, Algorithm, Version};
 	// Params::new expects memory cost in KiB; pass m_cost_kib directly.
-	let p = Params::new(params.m_cost_kib, params.t_cost, params.lanes as u32, Some(32))
-		.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("argon2 params: {e}")))?;
+	let p = Params::new(params.m_cost_kib, params.t_cost, params.lanes, Some(32))
+		.map_err(|e| std::io::Error::other(format!("argon2 params: {e}")))?;
 	let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, p);
 	let mut out = [0u8; 32];
 	let material = format!("{}:{}", username, password);
 	argon.hash_password_into(material.as_bytes(), salt, &mut out)
-		.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("argon2: {e}")))?;
+	.map_err(|e| std::io::Error::other(format!("argon2: {e}")))?;
 	Ok(out)
 }
 
@@ -146,12 +147,12 @@ fn sha256_bytes(input: &[u8]) -> [u8;32] {
 pub fn pbe_encrypt_file(username: &str, password: &str, input: &std::path::Path, output: &std::path::Path, kdf: Option<PbeKdfParams>) -> Result<(), Box<dyn std::error::Error>> {
 	let params = kdf.unwrap_or_default();
 	let mut pt = Vec::new(); fs::File::open(input)?.read_to_end(&mut pt)?;
-	let mut salt = [0u8;16]; getrandom::getrandom(&mut salt)?;
+	let mut salt = [0u8;16]; OsRng.fill_bytes(&mut salt);
 	let key = derive_pbe_key(username, password, &salt, &params)?;
-	let mut nonce_bytes = [0u8; 12]; getrandom::getrandom(&mut nonce_bytes)?;
-	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("aes key: {e}")))?;
+	let mut nonce_bytes = [0u8; 12]; OsRng.fill_bytes(&mut nonce_bytes);
+	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
 	let nonce = Nonce::from_slice(&nonce_bytes);
-	let ct = cipher.encrypt(nonce, pt.as_ref()).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("encrypt: {e}")))?;
+	let ct = cipher.encrypt(nonce, pt.as_ref()).map_err(|e| std::io::Error::other(format!("encrypt: {e}")))?;
 	let uname_hash = sha256_bytes(username.as_bytes());
 	let mut f = fs::File::create(output)?;
 	// header: MAGIC PBE | VERSION | salt(16) | t_cost(u32) | m_cost_kib(u32) | lanes(u32) | username_hash(32) | nonce(12)
@@ -181,10 +182,10 @@ pub fn pbe_decrypt_file(username: &str, password: &str, input: &std::path::Path,
 	let mut nonce_bytes = [0u8;12]; f.read_exact(&mut nonce_bytes)?;
 	let params = PbeKdfParams { t_cost, m_cost_kib: m_cost, lanes };
 	let key = derive_pbe_key(username, password, &salt, &params)?;
-	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("aes key: {e}")))?;
+	let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
 	let mut ct = Vec::new(); f.read_to_end(&mut ct)?;
 	let nonce = Nonce::from_slice(&nonce_bytes);
-	let pt = cipher.decrypt(nonce, ct.as_ref()).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("decrypt: {e}")))?;
+	let pt = cipher.decrypt(nonce, ct.as_ref()).map_err(|e| std::io::Error::other(format!("decrypt: {e}")))?;
 	fs::File::create(output)?.write_all(&pt)?;
 	Ok(())
 }

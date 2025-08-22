@@ -1,6 +1,10 @@
 use proptest::prelude::*;
 
 proptest! {
+    #![proptest_config(proptest::test_runner::Config {
+    failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::WithSource("proptest-regressions"))),
+        .. proptest::test_runner::Config::default()
+    })]
     #[test]
     fn prop_csv_infer_basic_ints(a in -100000i64..100000, b in -100000i64..100000) {
         use nexus_lite::engine::Engine;

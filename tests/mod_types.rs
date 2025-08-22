@@ -25,7 +25,7 @@ fn test_serializable_bson_document_serde() {
 #[test]
 fn test_serializable_datetime_serde() {
     let now = Utc::now();
-    let serializable_dt = SerializableDateTime(now.clone());
+    let serializable_dt = SerializableDateTime(now);
 
     let encoded = encode_to_vec(&serializable_dt, standard()).unwrap();
     let (decoded, _): (SerializableDateTime, usize) = bincode::serde::decode_from_slice(&encoded, standard()).unwrap();

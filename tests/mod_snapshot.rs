@@ -2,8 +2,7 @@ use nexus_lite::{Database, index::IndexKind};
 use nexus_lite::document::{Document, DocumentType};
 use bson::doc;
 use tempfile::tempdir;
-use bincode::serde::decode_from_slice;
-use bincode::config::standard;
+// Decoding uses library helper to support magic/version wrapper
 
 #[test]
 fn snapshot_contains_index_descriptors() {
@@ -80,9 +79,9 @@ fn snapshot_contains_index_descriptors() {
             Some(f) => f,
             None => { eprintln!("Skipping snapshot_contains_index_descriptors: cannot open snapshot with shared read"); return; }
         };
-        let mut bytes = Vec::new();
-        f.read_to_end(&mut bytes).unwrap();
-        let (snap, _) = decode_from_slice::<nexus_lite::wasp::DbSnapshot, _>(&bytes, standard()).unwrap();
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes).unwrap();
+    let snap = nexus_lite::wasp::decode_snapshot_from_bytes(&bytes).unwrap();
         let users = snap.indexes.get("users").expect("users indexes present");
         assert!(users.iter().any(|d| d.field == "age" && matches!(d.kind, IndexKind::BTree)));
         assert!(users.iter().any(|d| d.field == "name" && matches!(d.kind, IndexKind::Hash)));
@@ -90,9 +89,25 @@ fn snapshot_contains_index_descriptors() {
     #[cfg(not(target_os = "windows"))]
     {
     let bytes = std::fs::read(&snap_out).unwrap();
-        let (snap, _) = decode_from_slice::<nexus_lite::wasp::DbSnapshot, _>(&bytes, standard()).unwrap();
+        let snap = nexus_lite::wasp::decode_snapshot_from_bytes(&bytes).unwrap();
         let users = snap.indexes.get("users").expect("users indexes present");
         assert!(users.iter().any(|d| d.field == "age" && matches!(d.kind, IndexKind::BTree)));
         assert!(users.iter().any(|d| d.field == "name" && matches!(d.kind, IndexKind::Hash)));
     }
+}
+
+#[test]
+fn snapshot_newer_version_errors_gracefully() {
+    use nexus_lite::wasp::{DbSnapshot, SnapshotFile, SNAPSHOT_CURRENT_VERSION};
+    use bincode::serde::encode_to_vec;
+    use bincode::config::standard;
+
+    // Craft a snapshot with a higher version than supported
+    let snap = DbSnapshot { version: SNAPSHOT_CURRENT_VERSION + 1, operations: Vec::new(), indexes: std::collections::HashMap::new() };
+    let file = SnapshotFile { magic: *b"NXL1", version: SNAPSHOT_CURRENT_VERSION + 1, snapshot: snap };
+    let bytes = encode_to_vec(&file, standard()).expect("encode");
+
+    let err = nexus_lite::wasp::decode_snapshot_from_bytes(&bytes).unwrap_err();
+    // Should be an Unsupported error (and not a panic)
+    assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
 }

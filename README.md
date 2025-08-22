@@ -21,7 +21,7 @@ use nexus_lite::document::{Document, DocumentType};
 use nexus_lite::Database;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  // Open or create a database (auto-creates mydb.db and mydb.wasp)
+  // Open an existing database (creates mydb.wasp if missing). To create both files, use Database::new(Some("mydb.db")).
   let db = Database::open("mydb.db")?;
 
   // Create a collection and insert a document
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Logging
 
 - Database-scoped logs are written automatically to a folder named after the DB stem, e.g., for mydb.db logs go to `mydb_logs/mydb.log`.
-  You don’t need to call a global logger init; it’s handled during `Database::open`.
+  You don’t need to call a global logger init; it’s handled during `Database::open`/`new`.
 
 ## WASP storage engine (default)
 
@@ -78,13 +78,41 @@ WASP (Write-Ahead Shadow-Paging) is a crash-consistent storage engine designed f
 - Background compaction and space reclamation
 - Snapshot/MVCC-friendly read path
 
+### Snapshot format and versioning
+
+NexusLite writes a compact database snapshot into the `.db` file. The snapshot is a bincode-encoded structure wrapped with a small header:
+
+- Magic: `NXL1` (ASCII)
+- Version: `u32` (current: 1)
+- Payload: `DbSnapshot` (operations optional, plus index descriptors)
+
+Compatibility rules:
+
+- The reader requires the magic/version header. Legacy raw `DbSnapshot` without the header is not supported in this initial development build.
+- If a snapshot with a newer on-disk version is encountered, the reader returns an `Unsupported` error instead of panicking. Upgrade NexusLite to a compatible version or restore from a compatible snapshot.
+
+Note: Index descriptors are also persisted in the snapshot. On startup/open, NexusLite ensures required indexes exist by rebuilding when needed.
+
+### Handling snapshot decode errors (CLI)
+
+If `nexuslite open-db` or other commands encounter a snapshot decode error, you’ll see one of the following:
+
+- InvalidData (missing/invalid magic): the `.db` file is not a valid NexusLite snapshot for this build.
+- Unsupported (newer version): the snapshot was written by a newer NexusLite; this build can’t read it.
+
+Remediation:
+
+- Ensure you’re using the same or newer NexusLite build that created the snapshot.
+- If you only need the current state, re-run a checkpoint with a compatible build to regenerate the `.db` snapshot.
+- If the `.db` snapshot is corrupted but the `.wasp` log is intact, you can remove/replace the `.db` and let a compatible build re-checkpoint from `.wasp`.
+
 ## Build and test
 
 Using Cargo:
 
 ```powershell
 cargo build
-cargo test --all --all-features -- --nocapture
+cargo test --all-features -- --nocapture
 ```
 
 To enable optional regex support in queries, build with the feature flag:
@@ -432,10 +460,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   // Update document
   let updated = Document::new(doc!({"username": "alice", "age": 31}), DocumentType::Persistent);
-  db.update_document("users", &doc_id, updated)?;
+  db.update_document("people", &doc_id, updated)?;
 
   // Delete document
-  db.delete_document("users", &doc_id)?;
+  db.delete_document("people", &doc_id)?;
   Ok(())
 }
 ```
@@ -504,9 +532,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   };
   let docs = db.find("users", &filter, &opts)?.to_vec();
   assert_eq!(docs.len(), 1);
-  # then type commands like:
-    help
-    list-collections
 
   // Count
   let count = db.count("users", &filter)?;
@@ -560,7 +585,7 @@ JSON parsing helpers
 ```rust
 use nexus_lite::query::{parse_filter_json, parse_update_json};
 
-let f = parse_filter_json(r#"{"field":"age", "$gt": 21}"#)?; // Filter
+let f = parse_filter_json(r#"{"age": {"$gt": 21}}"#)?; // Filter
 let u = parse_update_json(r#"{"$set":{"active":true}, "$inc":{"logins":1}}"#)?; // UpdateDoc
 ```
 
@@ -568,7 +593,7 @@ Notes
 
 - $regex is behind the Cargo feature flag "regex". When enabled, only safe-length patterns (<= 512 chars) are accepted.
 - FindOptions::timeout_ms cancels long scans on a best-effort basis.
-- Logs are written to `{db_name}_logs/nexuslite.log` when opening a database.
+- Logs are written to `{db_name}_logs/{db_name}.log` when opening a database.
 - Projection semantics: when `FindOptions.projection` is set, returned documents contain only the requested fields (sorting is applied before projection).
 
 ## Future Enhancements

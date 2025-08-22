@@ -315,7 +315,7 @@ impl Cache {
             let mode = self.config.read().eviction_mode;
             if mode == EvictionMode::TtlOnly { return; }
 
-            while needed > 0 && cache.len() >= cap && cache.len() > 0 {
+            while needed > 0 && cache.len() >= cap && !cache.is_empty() {
                 let batch_size = self.config.read().batch_size.min(needed);
                 let max_samples = self.config.read().max_samples;
 

@@ -276,7 +276,7 @@ fn test_torn_write_protect_roundtrip() {
     use nexus_lite::wasp::torn_write_protect;
     let dir = tempdir().unwrap();
     let path = dir.path().join("torn.bin");
-    let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).open(&path).unwrap();
+    let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
     let data = b"abcdef";
     let ok = torn_write_protect(data, &mut f, 0).unwrap();
     assert!(ok);

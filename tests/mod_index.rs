@@ -127,7 +127,7 @@ fn test_planner_uses_index_equality_stats_hit() {
 
     // Run query that should use the index
     let filter = Filter::Cmp { path: "k".into(), op: CmpOp::Eq, value: 21.into() };
-    let cur = query::find_docs(&&col, &filter, &FindOptions::default());
+    let cur = query::find_docs(&col, &filter, &FindOptions::default());
     let docs = cur.to_vec();
     assert_eq!(docs.len(), 1);
     assert_eq!(docs[0].data.0.get_i32("k").unwrap(), 21);
@@ -158,7 +158,7 @@ fn test_collection_index_invalidation_update_delete() {
 
     // Query by old value
     let filter_old = Filter::Cmp { path: "k".into(), op: CmpOp::Eq, value: 5.into() };
-    assert_eq!(query::count_docs(&&col, &filter_old), 1);
+    assert_eq!(query::count_docs(&col, &filter_old), 1);
 
     // Update indexed field: k:5 -> k:7
     let d2 = nexus_lite::document::Document::new(doc!{"k": 7, "v": "x"}, nexus_lite::document::DocumentType::Persistent);
@@ -167,12 +167,12 @@ fn test_collection_index_invalidation_update_delete() {
 
     // Old value should not match; new value should
     let filter_new = Filter::Cmp { path: "k".into(), op: CmpOp::Eq, value: 7.into() };
-    assert_eq!(query::count_docs(&&col, &filter_old), 0);
-    assert_eq!(query::count_docs(&&col, &filter_new), 1);
+    assert_eq!(query::count_docs(&col, &filter_old), 0);
+    assert_eq!(query::count_docs(&col, &filter_new), 1);
 
     // Delete and ensure no match
     assert!(col.delete_document(&id));
-    assert_eq!(query::count_docs(&&col, &filter_new), 0);
+    assert_eq!(query::count_docs(&col, &filter_new), 0);
 }
 
 #[test]
@@ -283,7 +283,7 @@ fn test_index_wasp_overlay_compensates_index_miss() { with_env_lock(|| {
 
     // A query on k==42 should still find the doc because the planner merges WASP overlay deltas
     let filter = Filter::Cmp { path: "k".into(), op: CmpOp::Eq, value: 42.into() };
-    let cur = query::find_docs(&&col, &filter, &FindOptions::default());
+    let cur = query::find_docs(&col, &filter, &FindOptions::default());
     let docs = cur.to_vec();
     assert_eq!(docs.len(), 1, "overlay should compensate for base index miss");
     assert_eq!(docs[0].id, id);
@@ -309,7 +309,7 @@ fn test_index_wasp_overlay_persists_across_restart() { with_env_lock(|| {
 
     // Deltas should persist and be readable after restart
     let deltas = col2.index_deltas();
-    assert!(deltas.iter().any(|d| d.collection == col_name && d.field == "k" && match d.op { nexus_lite::wasp::DeltaOp::Add => true, _ => false } && d.id == id),
+    assert!(deltas.iter().any(|d| d.collection == col_name && d.field == "k" && matches!(d.op, nexus_lite::wasp::DeltaOp::Add) && d.id == id),
         "expected Add delta for id to persist across restart");
 }) }
 
@@ -338,7 +338,7 @@ fn test_index_wasp_overlay_across_restart_compensates_index_miss() { with_env_lo
 
     // Planner should use overlay deltas to return this id even if the base index is missing/stale
     let filter = Filter::Cmp { path: "k".into(), op: CmpOp::Eq, value: 42.into() };
-    let cur = query::find_docs(&&col2, &filter, &FindOptions::default());
+    let cur = query::find_docs(&col2, &filter, &FindOptions::default());
     let docs = cur.to_vec();
     assert_eq!(docs.len(), 1, "overlay should still guide query after restart");
     assert_eq!(docs[0].id, id);

@@ -30,30 +30,25 @@ fn load_config(cli_cfg: Option<PathBuf>) -> AppConfig {
     }
     if let Ok(cur) = std::env::current_dir() { paths.push(cur.join("nexuslite.toml")); }
     for p in paths {
-        if p.exists() {
-            if let Ok(s) = std::fs::read_to_string(&p) {
-                if let Ok(file_cfg) = toml::from_str::<AppConfig>(&s) {
-                    if cfg.db_path.is_none() { cfg.db_path = file_cfg.db_path; }
-                    if cfg.log_config.is_none() { cfg.log_config = file_cfg.log_config; }
-                    if cfg.default_collection.is_none() { cfg.default_collection = file_cfg.default_collection; }
-                    if cfg.sig_policy.is_none() { cfg.sig_policy = file_cfg.sig_policy; }
-                }
-            }
+        if p.exists()
+            && let Ok(s) = std::fs::read_to_string(&p)
+            && let Ok(file_cfg) = toml::from_str::<AppConfig>(&s)
+        {
+            if cfg.db_path.is_none() { cfg.db_path = file_cfg.db_path; }
+            if cfg.log_config.is_none() { cfg.log_config = file_cfg.log_config; }
+            if cfg.default_collection.is_none() { cfg.default_collection = file_cfg.default_collection; }
+            if cfg.sig_policy.is_none() { cfg.sig_policy = file_cfg.sig_policy; }
         }
     }
     // 3) Environment variables
-    if cfg.db_path.is_none() {
-        if let Ok(s) = std::env::var("NEXUSLITE_DB") { cfg.db_path = Some(PathBuf::from(s)); }
-    }
-    if cfg.log_config.is_none() {
-        if let Ok(s) = std::env::var("NEXUSLITE_LOG_CONFIG") { cfg.log_config = Some(PathBuf::from(s)); }
-    }
-    if cfg.default_collection.is_none() {
-        if let Ok(s) = std::env::var("NEXUSLITE_DEFAULT_COLLECTION") { cfg.default_collection = Some(s); }
-    }
-    if cfg.sig_policy.is_none() {
-        if let Ok(s) = std::env::var("NEXUSLITE_SIG_POLICY") { cfg.sig_policy = Some(s); }
-    }
+    if cfg.db_path.is_none()
+        && let Ok(s) = std::env::var("NEXUSLITE_DB") { cfg.db_path = Some(PathBuf::from(s)); }
+    if cfg.log_config.is_none()
+        && let Ok(s) = std::env::var("NEXUSLITE_LOG_CONFIG") { cfg.log_config = Some(PathBuf::from(s)); }
+    if cfg.default_collection.is_none()
+        && let Ok(s) = std::env::var("NEXUSLITE_DEFAULT_COLLECTION") { cfg.default_collection = Some(s); }
+    if cfg.sig_policy.is_none()
+        && let Ok(s) = std::env::var("NEXUSLITE_SIG_POLICY") { cfg.sig_policy = Some(s); }
     cfg
 }
 
@@ -340,7 +335,7 @@ enum Commands {
 
 fn ensure_engine(db_override: &Option<PathBuf>, cfg: &AppConfig) -> Result<Engine, Box<dyn std::error::Error>> {
     // Use WASP-backed engine by default when a db was specified; else fallback to WAL-in-temp for quick usage
-    if let Some(db) = db_override.as_ref().or_else(|| cfg.db_path.as_ref()) {
+    if let Some(db) = db_override.as_ref().or(cfg.db_path.as_ref()) {
         let wasp = db.with_extension("wasp");
         Engine::with_wasp(wasp)
     } else {
@@ -377,44 +372,37 @@ fn main() {
                 if username.is_empty() || password.is_empty() {
                     res = Err("PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD or run interactively".into());
                 }
-                if res.is_ok() {
-                    if let Err(e) = nexus_lite::api::decrypt_db_with_password(&path.as_path(), &username, &password) {
-                        res = Err(e.into());
-                    }
+                if res.is_ok()
+                    && let Err(e) = nexus_lite::api::decrypt_db_with_password(path.as_path(), &username, &password) {
+                    res = Err(e.into());
                 }
             }
             if res.is_ok() {
                 res = prog_cli::run(&engine, prog_cli::Command::DbOpen { db_path: path.clone() });
             }
-            if res.is_ok() && verify_sig {
-                if let Some(pk) = pubkey {
-                    if let Ok(pub_pem) = std::fs::read_to_string(&pk) {
+            if res.is_ok() && verify_sig
+                && let Some(pk) = pubkey
+                && let Ok(pub_pem) = std::fs::read_to_string(&pk) {
                         let wasp = path.with_extension("wasp");
                         let db_sig = path.with_extension("db.sig");
                         let wasp_sig = wasp.with_extension("wasp.sig");
                         let mut failed = false;
-                        if db_sig.exists() {
-                            if let Ok(sig) = std::fs::read(&db_sig) {
-                                if !nexus_lite::api::crypto_verify_file(&pub_pem, &path, &sig).unwrap_or(false) {
-                                    eprintln!("SIGNATURE VERIFICATION FAILED: {}", path.display());
-                                    failed = true;
-                                }
-                            }
+                        if db_sig.exists()
+                            && let Ok(sig) = std::fs::read(&db_sig)
+                            && !nexus_lite::api::crypto_verify_file(&pub_pem, &path, &sig).unwrap_or(false) {
+                            eprintln!("SIGNATURE VERIFICATION FAILED: {}", path.display());
+                            failed = true;
                         }
-                        if wasp.exists() && wasp_sig.exists() {
-                            if let Ok(sig) = std::fs::read(&wasp_sig) {
-                                if !nexus_lite::api::crypto_verify_file(&pub_pem, &wasp, &sig).unwrap_or(false) {
-                                    eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
-                                    failed = true;
-                                }
-                            }
+                        if wasp.exists() && wasp_sig.exists()
+                            && let Ok(sig) = std::fs::read(&wasp_sig)
+                            && !nexus_lite::api::crypto_verify_file(&pub_pem, &wasp, &sig).unwrap_or(false) {
+                            eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
+                            failed = true;
                         }
                         // Determine policy: CLI flag overrides config; default is fail
                         let warn = sig_warn || matches!(cfg.sig_policy.as_deref(), Some("warn"));
-                        if failed && !warn { res = Err("signature verification failed".into()); }
-                    }
-                }
-            }
+            if failed && !warn { res = Err("signature verification failed".into()); }
+        }
             res
         },
         Commands::CloseDb { path } => prog_cli::run(&engine, prog_cli::Command::DbClose { db_path: path }),
@@ -504,7 +492,7 @@ fn main() {
             // Basic fs checks; try to open db path if provided
             if let Some(db) = cli.db.clone().or_else(|| cfg.db_path.clone()) {
                 let wasp = db.with_extension("wasp");
-                let ok = std::fs::OpenOptions::new().read(true).write(true).create(true).open(&wasp).is_ok();
+                let ok = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&wasp).is_ok();
                 println!("wasp_access:{} path:{}", ok, wasp.display());
             } else {
                 println!("no_db_specified");
@@ -543,6 +531,8 @@ fn main() {
                 env_secret_keys.sort();
                 println!("env_secrets: {} entries (values REDACTED)", env_secret_keys.len());
                 for k in env_secret_keys { println!("env:{}=REDACTED", k); }
+                // Summary status for environments with secrets
+                println!("status:warning");
             }
             println!("advice: prefer environment variables for secrets; avoid storing secrets in config files");
             Ok(())
@@ -605,17 +595,15 @@ fn main() {
                         continue;
                     }
                 }
-                if let Some(rest) = trimmed.strip_prefix("count ") {
-                    if let Some((col, fjson)) = rest.split_once(' ') {
-                        prog_cli::run(&engine, prog_cli::Command::QueryCount { collection: col.to_string(), filter_json: fjson.to_string() }).ok();
-                        continue;
-                    }
+                if let Some(rest) = trimmed.strip_prefix("count ")
+                    && let Some((col, fjson)) = rest.split_once(' ') {
+                    prog_cli::run(&engine, prog_cli::Command::QueryCount { collection: col.to_string(), filter_json: fjson.to_string() }).ok();
+                    continue;
                 }
-                if let Some(rest) = trimmed.strip_prefix("delete ") {
-                    if let Some((col, fjson)) = rest.split_once(' ') {
-                        prog_cli::run(&engine, prog_cli::Command::QueryDelete { collection: col.to_string(), filter_json: fjson.to_string() }).ok();
-                        continue;
-                    }
+                if let Some(rest) = trimmed.strip_prefix("delete ")
+                    && let Some((col, fjson)) = rest.split_once(' ') {
+                    prog_cli::run(&engine, prog_cli::Command::QueryDelete { collection: col.to_string(), filter_json: fjson.to_string() }).ok();
+                    continue;
                 }
                 if let Some(rest) = trimmed.strip_prefix("update ") {
                     // format: update <collection> <filter-json> <update-json>
@@ -637,7 +625,7 @@ fn main() {
                         let mut ephemeral = false; let mut ttl = None::<u64>;
                         for t in parts {
                             if t.eq_ignore_ascii_case("ephemeral") { ephemeral = true; }
-                            if let Some(v) = t.strip_prefix("ttl=") { if let Ok(secs) = v.parse::<u64>() { ttl = Some(secs); } }
+                            if let Some(v) = t.strip_prefix("ttl=") && let Ok(secs) = v.parse::<u64>() { ttl = Some(secs); }
                         }
                         prog_cli::run(&engine, prog_cli::Command::CreateDocument { collection: Some(col.to_string()), json, ephemeral, ttl_secs: ttl }).ok();
                         continue;

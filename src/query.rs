@@ -80,7 +80,7 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn next(&mut self) -> Option<Document> {
+    pub fn advance(&mut self) -> Option<Document> {
         if let Some(ref docs) = self.docs {
             if self.pos >= docs.len() { return None; }
             let d = docs[self.pos].clone();
@@ -97,9 +97,14 @@ impl Cursor {
             return docs;
         }
         let mut out = Vec::with_capacity(self.ids.len());
-        while let Some(d) = self.next() { out.push(d); }
+        while let Some(d) = self.advance() { out.push(d); }
         out
     }
+}
+
+impl Iterator for Cursor {
+    type Item = Document;
+    fn next(&mut self) -> Option<Self::Item> { self.advance() }
 }
 
 // Serde-facing structures for safe JSON parsing of filters/updates
@@ -115,11 +120,11 @@ pub enum FilterSerde {
     // Comparisons and membership
     Cmp {
         field: String,
-        #[serde(rename = "$eq")] eq: Option<Bson>,
-        #[serde(rename = "$gt")] gt: Option<Bson>,
-        #[serde(rename = "$gte")] gte: Option<Bson>,
-        #[serde(rename = "$lt")] lt: Option<Bson>,
-        #[serde(rename = "$lte")] lte: Option<Bson>,
+        #[serde(rename = "$eq")] eq: Box<Option<Bson>>,
+        #[serde(rename = "$gt")] gt: Box<Option<Bson>>,
+        #[serde(rename = "$gte")] gte: Box<Option<Bson>>,
+        #[serde(rename = "$lt")] lt: Box<Option<Bson>>,
+        #[serde(rename = "$lte")] lte: Box<Option<Bson>>,
     },
     In { field: String, #[serde(rename = "$in")] in_vals: Vec<Bson> },
     Nin { field: String, #[serde(rename = "$nin")] nin_vals: Vec<Bson> },
@@ -139,11 +144,11 @@ impl TryFrom<FilterSerde> for Filter {
             FS::Not { not } => Filter::Not(Box::new(Filter::try_from(*not)?)),
             FS::Exists { field, exists } => Filter::Exists { path: field, exists },
             FS::Cmp { field, eq, gt, gte, lt, lte } => {
-                if let Some(v) = eq { Filter::Cmp { path: field, op: CmpOp::Eq, value: v } }
-                else if let Some(v) = gt { Filter::Cmp { path: field, op: CmpOp::Gt, value: v } }
-                else if let Some(v) = gte { Filter::Cmp { path: field, op: CmpOp::Gte, value: v } }
-                else if let Some(v) = lt { Filter::Cmp { path: field, op: CmpOp::Lt, value: v } }
-                else if let Some(v) = lte { Filter::Cmp { path: field, op: CmpOp::Lte, value: v } }
+                if let Some(v) = *eq { Filter::Cmp { path: field, op: CmpOp::Eq, value: v } }
+                else if let Some(v) = *gt { Filter::Cmp { path: field, op: CmpOp::Gt, value: v } }
+                else if let Some(v) = *gte { Filter::Cmp { path: field, op: CmpOp::Gte, value: v } }
+                else if let Some(v) = *lt { Filter::Cmp { path: field, op: CmpOp::Lt, value: v } }
+                else if let Some(v) = *lte { Filter::Cmp { path: field, op: CmpOp::Lte, value: v } }
                 else { return Err(crate::errors::DbError::QueryError("No comparison operator provided".into())); }
             }
             FS::In { field, in_vals } => Filter::In { path: field, values: in_vals.into_iter().take(MAX_IN_SET).collect() },
@@ -198,12 +203,11 @@ pub fn parse_update_json(json: &str) -> Result<UpdateDoc, crate::errors::DbError
 pub fn update_many(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) -> UpdateReport {
     let mut matched = 0u64;
     let mut modified = 0u64;
-    // Snapshot IDs to avoid holding locks during updates
+    // Snapshot candidate IDs to avoid cloning entire collection
     let ids: Vec<DocumentId> = col
-        .get_all_documents()
+        .list_ids()
         .into_iter()
-        .filter(|d| eval_filter(&d.data.0, filter))
-        .map(|d| d.id)
+        .filter(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
         .collect();
     for id in ids {
         if let Some(mut doc) = col.find_document(&id) {
@@ -219,16 +223,14 @@ pub fn update_many(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) -
 pub fn update_one(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) -> UpdateReport {
     // Find first matching ID
     if let Some(id) = col
-        .get_all_documents()
+        .list_ids()
         .into_iter()
-        .find(|d| eval_filter(&d.data.0, filter))
-        .map(|d| d.id)
+        .find(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
+        && let Some(mut doc) = col.find_document(&id)
     {
-        if let Some(mut doc) = col.find_document(&id) {
-            let changed = apply_update(&mut doc, update);
-            col.update_document(&id, doc);
-            return UpdateReport { matched: 1, modified: if changed { 1 } else { 0 } };
-        }
+        let changed = apply_update(&mut doc, update);
+        col.update_document(&id, doc);
+        return UpdateReport { matched: 1, modified: if changed { 1 } else { 0 } };
     }
     UpdateReport { matched: 0, modified: 0 }
 }
@@ -236,10 +238,9 @@ pub fn update_one(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) ->
 pub fn delete_many(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
     let mut deleted = 0u64;
     let ids: Vec<DocumentId> = col
-        .get_all_documents()
+        .list_ids()
         .into_iter()
-        .filter(|d| eval_filter(&d.data.0, filter))
-        .map(|d| d.id)
+        .filter(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
         .collect();
     for id in ids {
         if col.delete_document(&id) { deleted += 1; }
@@ -249,10 +250,9 @@ pub fn delete_many(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
 
 pub fn delete_one(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
     if let Some(id) = col
-        .get_all_documents()
+        .list_ids()
         .into_iter()
-        .find(|d| eval_filter(&d.data.0, filter))
-        .map(|d| d.id)
+        .find(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
     {
         let deleted = if col.delete_document(&id) { 1 } else { 0 };
         return DeleteReport { deleted };
@@ -262,30 +262,49 @@ pub fn delete_one(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
 
 pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> Cursor {
     let deadline = opts.timeout_ms.map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms));
-    // Planner: try to use a single-field index for simple equality/range, else full scan
+    let needs_projection = opts.projection.is_some();
+
+    // If no projection is needed, prefer a lazy path accumulating only IDs to avoid cloning many docs.
+    if !needs_projection && opts.sort.is_none() {
+        // Try to get candidate IDs from index, else all IDs
+        let mut ids: Vec<crate::types::DocumentId> = if let Some(cands) = plan_index_candidates(col, filter) {
+            cands
+        } else {
+            col.list_ids()
+        };
+        // Filter IDs by evaluating on fetched docs lazily
+        ids.retain(|id| {
+            if let Some(dl) = deadline && std::time::Instant::now() > dl { return false; }
+            col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false)
+        });
+        let skip = opts.skip.unwrap_or(0);
+        let limit = opts.limit.unwrap_or(usize::MAX).min(MAX_LIMIT);
+        let end = skip.saturating_add(limit).min(ids.len());
+        let sliced: Vec<_> = if skip >= ids.len() { Vec::new() } else { ids[skip..end].to_vec() };
+        return Cursor { collection: col.clone(), ids: sliced, pos: 0, docs: None };
+    }
+
+    // Otherwise, materialize docs for sorting/projection as before
     let mut docs: Vec<Document> = if let Some(cands) = plan_index_candidates(col, filter) {
-        // Materialize candidate docs
         cands.into_iter().filter_map(|id| col.find_document(&id)).collect()
     } else {
         col.get_all_documents()
     };
     docs.retain(|d| {
-        if let Some(dl) = deadline { if std::time::Instant::now() > dl { return false; } }
+        if let Some(dl) = deadline && std::time::Instant::now() > dl { return false; }
         eval_filter(&d.data.0, filter)
     });
     if let Some(specs) = &opts.sort {
-        // Enforce max sort fields
-        let mut limited_specs: Vec<SortSpec> = specs.iter().cloned().take(MAX_SORT_FIELDS).collect();
-        sort_docs(&mut docs, &mut limited_specs);
+    let limited_specs: Vec<SortSpec> = specs.iter().take(MAX_SORT_FIELDS).cloned().collect();
+    sort_docs(&mut docs, &limited_specs);
     }
     let skip = opts.skip.unwrap_or(0);
     let limit = opts.limit.unwrap_or(usize::MAX).min(MAX_LIMIT);
     let end = skip.saturating_add(limit).min(docs.len());
     let slice = if skip >= docs.len() { &docs[0..0] } else { &docs[skip..end] };
-    let mut projected: Vec<Document> = slice.iter().cloned().collect();
+    let mut projected: Vec<Document> = slice.to_vec();
     if let Some(fields) = &opts.projection {
-        // Enforce max projection fields
-        let limited_fields: Vec<String> = fields.iter().cloned().take(MAX_PROJECTION_FIELDS).collect();
+        let limited_fields: Vec<String> = fields.iter().take(MAX_PROJECTION_FIELDS).cloned().collect();
         for d in &mut projected {
             d.data.0 = project(&d.data.0, &limited_fields).unwrap_or_else(|| d.data.0.clone());
         }
@@ -316,12 +335,11 @@ fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<D
                 CmpOp::Eq => {
                     let key_opt = delta_key_from_bson(value);
                     for d in deltas.iter() {
-                        if d.collection == col_name && d.field == *path {
-                            if let Some(k) = key_opt.as_ref() {
-                                if delta_key_eq(d.key.clone(), k) {
-                                    match d.op { DeltaOp::Add => { set.insert(d.id.clone()); }, DeltaOp::Remove => { set.remove(&d.id); } }
-                                }
-                            }
+                        if d.collection == col_name && d.field == *path
+                            && let Some(k) = key_opt.as_ref()
+                            && delta_key_eq(d.key.clone(), k)
+                        {
+                            match d.op { DeltaOp::Add => { set.insert(d.id.clone()); }, DeltaOp::Remove => { set.remove(&d.id); } }
                         }
                     }
                 }
@@ -334,10 +352,10 @@ fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<D
                         _ => (None, None, false, false),
                     };
                     for d in deltas.iter() {
-                        if d.collection == col_name && d.field == *path {
-                            if delta_key_in_range(&d.key, min, max, incl_min, incl_max) {
-                                match d.op { DeltaOp::Add => { set.insert(d.id.clone()); }, DeltaOp::Remove => { set.remove(&d.id); } }
-                            }
+                        if d.collection == col_name && d.field == *path
+                            && delta_key_in_range(&d.key, min, max, incl_min, incl_max)
+                        {
+                            match d.op { DeltaOp::Add => { set.insert(d.id.clone()); }, DeltaOp::Remove => { set.remove(&d.id); } }
                         }
                     }
                 }
@@ -377,7 +395,7 @@ fn delta_key_cmp_val(a: &DeltaKey, v: &Bson) -> Option<Ordering> {
     match (a, v) {
         (DK::Str(x), Bson::String(y)) => Some(x.cmp(y)),
         (DK::Bool(x), Bson::Boolean(y)) => Some(x.cmp(y)),
-    (DK::I64(x), Bson::Int32(y)) => Some((*x as i64).cmp(&(*y as i64))),
+    (DK::I64(x), Bson::Int32(y)) => Some((*x).cmp(&(*y as i64))),
         (DK::I64(x), Bson::Int64(y)) => Some(x.cmp(y)),
         (DK::I64(x), Bson::Double(y)) => (*x as f64).partial_cmp(y),
         (DK::F64(x), Bson::Double(y)) => x.partial_cmp(y),
@@ -405,7 +423,7 @@ pub fn count_docs(col: &Arc<Collection>, filter: &Filter) -> usize {
     if let Some(cands) = plan_index_candidates(col, filter) {
         cands.into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count()
     } else {
-        col.get_all_documents().into_iter().filter(|d| eval_filter(&d.data.0, filter)).count()
+    col.list_ids().into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count()
     }
 }
 
@@ -529,8 +547,8 @@ fn set_path(doc: &mut BsonDocument, path: &str, val: Bson) -> bool {
     let parts: Vec<&str> = path.split('.').collect();
     if parts.is_empty() { return false; }
     let mut cur = doc;
-    for i in 0..parts.len() - 1 {
-        let key = parts[i].to_string();
+    for key in parts.iter().take(parts.len() - 1) {
+        let key = key.to_string();
         let need_new = match cur.get_mut(&key) {
             Some(Bson::Document(_)) => false,
             Some(_) => true,
@@ -539,11 +557,7 @@ fn set_path(doc: &mut BsonDocument, path: &str, val: Bson) -> bool {
         if need_new {
             cur.insert(key.clone(), Bson::Document(BsonDocument::new()));
         }
-        if let Some(child) = cur.get_mut(&key) {
-            if let Bson::Document(d) = child { cur = d; } else { return false; }
-        } else {
-            return false;
-        }
+    if let Some(Bson::Document(d)) = cur.get_mut(&key) { cur = d; } else { return false; }
     }
     let last = match parts.last() { Some(l) => l, None => return false };
     let prev = cur.get(*last).cloned();
@@ -568,8 +582,8 @@ fn unset_path(doc: &mut BsonDocument, path: &str) -> bool {
     let parts: Vec<&str> = path.split('.').collect();
     if parts.is_empty() { return false; }
     let mut cur = doc;
-    for i in 0..parts.len() - 1 {
-        let key = parts[i];
+    for key in parts.iter().take(parts.len() - 1) {
+        let key = *key;
         match cur.get_mut(key) { Some(Bson::Document(d)) => { cur = d; }, _ => return false }
     }
     let last = match parts.last() { Some(l) => l, None => return false };

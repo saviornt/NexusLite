@@ -36,7 +36,7 @@ impl BloomFilter {
 
 use std::io::{self, SeekFrom, Read, Write, Seek};
 use std::path::PathBuf;
-use rand::Rng;
+use rand::RngCore;
 use crate::types::Operation;
 use bincode::serde::{encode_to_vec, decode_from_slice};
 use bincode::config::standard;
@@ -48,20 +48,21 @@ use crate::index::IndexKind as IxKind;
 // Minimal block cache handle; extend to store decoded pages if needed.
 pub struct BlockCache {}
 impl BlockCache { pub fn new() -> Self { BlockCache {} } }
+impl Default for BlockCache { fn default() -> Self { Self::new() } }
 
 
 use std::sync::Arc;
 use parking_lot::RwLock;
 /// Prefetch pages into an in-memory cache for sequential scans (synchronous for now).
 pub fn prefetch_pages(ids: &[u64], file: &mut File, cache: &Arc<RwLock<BlockCache>>) {
+	let _ = cache; // Silence unused variable warning
+	let mut buf = vec![0u8; WASP_PAGE_SIZE];
 	for &page_id in ids {
 		// Simulate prefetch by reading the page into memory (could be async in future)
-		let offset = 2 * WASP_PAGE_SIZE as u64 + (page_id - 1) * WASP_PAGE_SIZE as u64;
-		let mut buf = vec![0u8; WASP_PAGE_SIZE];
-		let _ = cache; // Silence unused variable warning
+		let offset = 2 * WASP_PAGE_SIZE as u64 + (page_id.saturating_sub(1)) * WASP_PAGE_SIZE as u64;
 		if file.seek(SeekFrom::Start(offset)).is_ok() && file.read_exact(&mut buf).is_ok() {
 			// In a real cache, insert the page here
-			// cache.write().insert(page_id, buf);
+			// cache.write().insert(page_id, buf.clone());
 		}
 	}
 }
@@ -83,6 +84,7 @@ impl WasMetrics {
 		println!("[WASP Metrics] (placeholder): metrics collection not yet implemented.");
 	}
 }
+impl Default for WasMetrics { fn default() -> Self { Self::new() } }
 
 
 /// Entry point for WASP microbenchmarks (placeholder).
@@ -151,11 +153,10 @@ impl ConsistencyChecker {
 					d.page_decoded = true;
 					d.page_type_ok = page.header.page_type == 1;
 					d.crc_ok = page.verify_crc();
-					if d.page_type_ok && d.crc_ok {
-						if let Ok(m) = Manifest::from_bytes(&page.data) {
-							d.manifest_decoded = true;
-							d.version = Some(m.version);
-						}
+					if d.page_type_ok && d.crc_ok
+						&& let Ok(m) = Manifest::from_bytes(&page.data) {
+						d.manifest_decoded = true;
+						d.version = Some(m.version);
 					}
 				}
 			}
@@ -169,6 +170,7 @@ impl ConsistencyChecker {
 		self.check_detailed(file).both_valid
 	}
 }
+impl Default for ConsistencyChecker { fn default() -> Self { Self::new() } }
 
 /// Repair manifest slots so both contain the latest valid manifest page. Returns a detailed report.
 pub fn recover_manifests(file: &mut File) -> io::Result<ConsistencyReport> {
@@ -181,18 +183,12 @@ pub fn recover_manifests(file: &mut File) -> io::Result<ConsistencyReport> {
 	for (i, off) in offsets.iter().enumerate() {
 		let mut buf = vec![0u8; WASP_PAGE_SIZE];
 		file.seek(SeekFrom::Start(*off))?;
-		if file.read_exact(&mut buf).is_ok() {
-			if let Ok((page, _)) = decode_from_slice::<Page, _>(&buf, standard()) {
-				if page.header.page_type == 1 && page.verify_crc() {
-					if let Ok(man) = Manifest::from_bytes(&page.data) {
-						let v = man.version;
-						match latest_valid {
-							Some((_, best_v, _)) if v <= best_v => {}
-							_ => latest_valid = Some((i, v, buf.clone())),
-						}
-					}
-				}
-			}
+		if file.read_exact(&mut buf).is_ok()
+			&& let Ok((page, _)) = decode_from_slice::<Page, _>(&buf, standard())
+			&& page.header.page_type == 1 && page.verify_crc()
+			&& let Ok(man) = Manifest::from_bytes(&page.data) {
+			let v = man.version;
+			match latest_valid { Some((_, best_v, _)) if v <= best_v => {}, _ => latest_valid = Some((i, v, buf.clone())), }
 		}
 	}
 
@@ -200,7 +196,7 @@ pub fn recover_manifests(file: &mut File) -> io::Result<ConsistencyReport> {
 	let (best_slot, _best_ver, best_bytes) = latest_valid.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "No valid manifest slot to recover from"))?;
 
 	// Copy best to the other slot if needed, or if versions differ
-	for i in 0..2 {
+	for (i, _off) in offsets.iter().enumerate() {
 		if i == best_slot { continue; }
 		let d = &report.slots[i];
 		let needs_copy = !(d.read_ok && d.page_decoded && d.page_type_ok && d.crc_ok && d.manifest_decoded);
@@ -224,8 +220,8 @@ pub fn fuzz_test_corruption(file: &mut File) -> bool {
 	// Corrupt the first manifest slot and check if the second is still valid
 	if file.seek(SeekFrom::Start(0)).is_ok() {
 		let mut buf = vec![0u8; WASP_PAGE_SIZE];
-	let mut rng = rand::rng();
-	for b in &mut buf { *b = rng.random(); }
+		let mut rng = rand::thread_rng();
+		rng.fill_bytes(&mut buf);
 		if file.write_all(&buf).is_ok() && file.sync_data().is_ok() {
 			// Now check if the second manifest is still valid
 			let checker = ConsistencyChecker::new();
@@ -244,12 +240,14 @@ impl SnapshotTracker {
 	pub fn new() -> Self { SnapshotTracker { current_epoch: 0 } }
 	pub fn advance(&mut self) { self.current_epoch += 1; }
 }
+impl Default for SnapshotTracker { fn default() -> Self { Self::new() } }
 
 pub struct MvccEngine {}
 impl MvccEngine {
 	pub fn new() -> Self { MvccEngine {} }
 	pub fn visible(&self, _epoch: u64, _txn_epoch: u64) -> bool { true }
 }
+impl Default for MvccEngine { fn default() -> Self { Self::new() } }
 
 pub struct CompactionEngine {}
 impl CompactionEngine {
@@ -265,18 +263,21 @@ impl CompactionEngine {
 		});
 	}
 }
+impl Default for CompactionEngine { fn default() -> Self { Self::new() } }
 
 pub struct FreeSpaceMap {}
 impl FreeSpaceMap {
 	pub fn new() -> Self { FreeSpaceMap {} }
 	pub fn recycle(&mut self, _page_id: u64) {}
 }
+impl Default for FreeSpaceMap { fn default() -> Self { Self::new() } }
 
 pub struct EpochGc {}
 impl EpochGc {
 	pub fn new() -> Self { EpochGc {} }
 	pub fn gc(&mut self, _epoch: u64) {}
 }
+impl Default for EpochGc { fn default() -> Self { Self::new() } }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SegmentFooter {
@@ -315,7 +316,7 @@ pub struct SegmentFile {
 
 impl SegmentFile {
 	pub fn open(path: PathBuf) -> io::Result<Self> {
-		let file = OpenOptions::new().read(true).write(true).create(true).open(path)?;
+		let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
 		Ok(SegmentFile { file })
 	}
 
@@ -373,7 +374,7 @@ impl TinyWal {
 		self.file.sync_data()
 	}
 	pub fn open(path: PathBuf) -> io::Result<Self> {
-		let file = OpenOptions::new().read(true).write(true).create(true).open(path)?;
+		let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
 		Ok(TinyWal { file })
 	}
 
@@ -516,7 +517,7 @@ impl CowTree {
 	pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> io::Result<()> {
 		const MAX_KEYS: usize = 32;
 		// Recursive insert, returns (new_page_id, promoted_key)
-		fn insert_rec(tree: &mut CowTree, page_id: u64, key: Vec<u8>, value: Vec<u8>) -> io::Result<(u64, Option<(Vec<u8>, u64)>)> {
+		fn insert_rec(tree: &mut CowTree, page_id: u64, key: Vec<u8>, value: Vec<u8>) -> InsertRecResult {
 			let mut node = {
 				let page = tree.read_page(page_id)?;
 				decode_from_slice::<CowNode, _>(&page.data, standard()).map(|(n, _)| n).unwrap_or(CowNode::new_leaf())
@@ -568,7 +569,7 @@ impl CowTree {
 							let mid = keys.len() / 2;
 							let right_keys = keys.split_off(mid + 1);
 							let right_children = children.split_off(mid + 1);
-							let promoted = match keys.pop() { Some(k) => k, None => return Err(io::Error::new(io::ErrorKind::Other, "internal split with empty keys")) };
+							let promoted = match keys.pop() { Some(k) => k, None => return Err(io::Error::other("internal split with empty keys")) };
 							let right = CowNode::Internal { keys: right_keys, children: right_children };
 							let new_right_id = tree.alloc.alloc();
 							let right_bytes = encode_to_vec(&right, standard())
@@ -727,7 +728,7 @@ impl Page {
 	pub fn new(page_id: u64, version: u64, page_type: u8, data: Vec<u8>) -> Self {
 		let mut header = PageHeader::new(page_id, version, page_type, data.len() as u32);
 		let mut hasher = Crc32Hasher::new();
-	if let Ok(hdr_bytes) = encode_to_vec(&header, standard()) { hasher.update(&hdr_bytes); }
+	if let Ok(hdr_bytes) = encode_to_vec(header, standard()) { hasher.update(&hdr_bytes); }
 		hasher.update(&data);
 		header.crc32 = hasher.finalize();
 		Page { header, data }
@@ -738,7 +739,7 @@ impl Page {
 		let crc_orig = header.crc32;
 		header.crc32 = 0;
 		let mut hasher = Crc32Hasher::new();
-	if let Ok(hdr_bytes) = encode_to_vec(&header, standard()) { hasher.update(&hdr_bytes); }
+	if let Ok(hdr_bytes) = encode_to_vec(header, standard()) { hasher.update(&hdr_bytes); }
 		hasher.update(&self.data);
 		hasher.finalize() == crc_orig
 	}
@@ -765,7 +766,8 @@ pub struct WaspFile {
 
 impl WaspFile {
 	pub fn open(path: PathBuf) -> io::Result<Self> {
-		let mut file = OpenOptions::new().read(true).write(true).create(true).open(&path)?;
+		// Do not truncate on open; preserve existing data. Be explicit to satisfy clippy.
+		let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
 		let manifest_offsets = [0, WASP_PAGE_SIZE as u64];
 		let meta = file.metadata()?;
 		let min_size = 2 * WASP_PAGE_SIZE as u64;
@@ -815,12 +817,10 @@ impl WaspFile {
 			let mut buf = vec![0u8; WASP_PAGE_SIZE];
 			self.file.read_exact(&mut buf)?;
 			let (page, _): (Page, _) = decode_from_slice(&buf, standard()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-			if page.header.page_type == 1 && page.verify_crc() {
-				if let Ok(manifest) = Manifest::from_bytes(&page.data) {
-					if best.as_ref().map(|(v, _)| manifest.version > *v).unwrap_or(true) {
-						best = Some((manifest.version, manifest));
-					}
-				}
+			if page.header.page_type == 1 && page.verify_crc()
+				&& let Ok(manifest) = Manifest::from_bytes(&page.data)
+				&& best.as_ref().map(|(v, _)| manifest.version > *v).unwrap_or(true) {
+				best = Some((manifest.version, manifest));
 			}
 		}
 		match best {
@@ -842,6 +842,7 @@ pub const WASP_SEGMENT_SIZE: usize = 128 * 1024 * 1024; // 128 MB
 
 // Block allocator and free space map
 use std::collections::BTreeSet;
+type InsertRecResult = io::Result<(u64, Option<(Vec<u8>, u64)>)>;
 #[derive(Debug, Default)]
 pub struct BlockAllocator {
 	free_pages: BTreeSet<u64>,
@@ -994,7 +995,7 @@ impl Wasp {
 			if db_path.exists() {
 				let _ = std::fs::remove_file(db_path);
 			}
-			rename(&tmp_path, db_path)?;
+			std::fs::rename(&tmp_path, db_path)?;
 		}
 
 		// 5. Truncate the WASP log (start fresh)
@@ -1009,9 +1010,8 @@ impl Wasp {
 	#[allow(clippy::missing_errors_doc)]
 	pub fn checkpoint_with_meta(&mut self, db_path: &std::path::Path, indexes: std::collections::HashMap<String, Vec<IndexDescriptor>>) -> io::Result<()> {
 		// Keep this lightweight and robust on Windows: skip scanning the WASP log and just persist index metadata.
-		let snapshot = DbSnapshot { version: 1, operations: Vec::new(), indexes };
-		let encoded = encode_to_vec(&snapshot, standard())
-			.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+		let snapshot = DbSnapshot { version: SNAPSHOT_CURRENT_VERSION, operations: Vec::new(), indexes };
+		let encoded = encode_snapshot_file(&snapshot)?;
 		#[cfg(target_os = "windows")]
 		{
 			// On Windows, write directly to the destination to avoid rename/replace sharing violations.
@@ -1027,12 +1027,7 @@ impl Wasp {
 			db_file.sync_data()?;
 			drop(db_file);
 			if db_path.exists() { let _ = std::fs::remove_file(db_path); }
-			rename(&tmp_path, db_path)?;
-		}
-		#[cfg(not(target_os = "windows"))]
-		{
-			if db_path.exists() { let _ = std::fs::remove_file(db_path); }
-			rename(&tmp_path, db_path)?;
+			std::fs::rename(&tmp_path, db_path)?;
 		}
 
 		// Truncate WAL (skip on Windows to avoid sharing violations during tests)
@@ -1052,12 +1047,49 @@ pub struct DbSnapshot {
     pub indexes: std::collections::HashMap<String, Vec<IndexDescriptor>>,
 }
 
+// Snapshot file wrapper with magic + version for forward/backward compatibility
+pub const SNAPSHOT_MAGIC: [u8; 4] = *b"NXL1";
+pub const SNAPSHOT_CURRENT_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotFile {
+	pub magic: [u8; 4],
+	pub version: u32,
+	pub snapshot: DbSnapshot,
+}
+
+impl SnapshotFile {
+	pub fn new(snapshot: DbSnapshot) -> Self {
+		SnapshotFile { magic: SNAPSHOT_MAGIC, version: SNAPSHOT_CURRENT_VERSION, snapshot }
+	}
+}
+
+/// Encode a snapshot file with magic+version header.
+pub fn encode_snapshot_file(snap: &DbSnapshot) -> io::Result<Vec<u8>> {
+	let file = SnapshotFile::new(snap.clone());
+	encode_to_vec(&file, standard()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Decode a snapshot from bytes, supporting both wrapped and legacy formats.
+pub fn decode_snapshot_from_bytes(bytes: &[u8]) -> io::Result<DbSnapshot> {
+	// Require magic header
+	if bytes.len() < 4 || bytes[0..4] != SNAPSHOT_MAGIC {
+		return Err(io::Error::new(io::ErrorKind::InvalidData, "missing or invalid snapshot magic"));
+	}
+	let (file, _) = decode_from_slice::<SnapshotFile, _>(bytes, standard())
+		.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+	if file.version > SNAPSHOT_CURRENT_VERSION {
+		return Err(io::Error::new(io::ErrorKind::Unsupported, "snapshot format version is newer than this build supports"));
+	}
+	Ok(file.snapshot)
+}
+
 impl StorageEngine for Wasp {
 	#[allow(clippy::missing_errors_doc)]
 	fn append(&mut self, operation: &Operation) -> io::Result<()> {
 	// Wrap as frame and encode
 	let frame = WaspFrame::Op(operation.clone());
-	let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::other(e))?;
+	let encoded = encode_to_vec(&frame, standard()).map_err(io::Error::other)?;
 	// length-prefixed frame
 	self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
 	self.file.write_all(&encoded)?;
@@ -1107,7 +1139,7 @@ impl StorageEngine for Wasp {
 	#[allow(clippy::missing_errors_doc)]
 	fn append_index_delta(&mut self, delta: IndexDelta) -> io::Result<()> {
 		let frame = WaspFrame::Idx(delta);
-		let encoded = encode_to_vec(&frame, standard()).map_err(|e| io::Error::other(e))?;
+		let encoded = encode_to_vec(&frame, standard()).map_err(io::Error::other)?;
 		self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
 		self.file.write_all(&encoded)?;
 		self.file.flush()

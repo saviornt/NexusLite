@@ -20,8 +20,7 @@ impl Wal {
     }
 
     pub fn append(&mut self, operation: &Operation) -> io::Result<()> {
-        let encoded = encode_to_vec(operation, standard())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let encoded = encode_to_vec(operation, standard()).map_err(io::Error::other)?;
         self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
         self.file.write_all(&encoded)?;
         self.file.flush()

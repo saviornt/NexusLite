@@ -149,6 +149,13 @@ impl Collection {
         documents
     }
 
+    /// Return only the IDs of all documents without cloning each document.
+    pub fn list_ids(&self) -> Vec<DocumentId> {
+        let cache = self.cache.clone();
+        let store = cache.store.read();
+        store.iter().map(|(id, _)| id.clone()).collect()
+    }
+
     pub fn cache_metrics(&self) -> crate::cache::CacheMetricsSnapshot {
         self.cache.metrics_snapshot()
     }

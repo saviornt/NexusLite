@@ -40,13 +40,13 @@ fn find_sort_project_paginate() {
 
     let filter = Filter::Cmp { path: "age".into(), op: CmpOp::Gt, value: 30.into() };
     let opts = FindOptions { projection: Some(vec!["name".into()]), sort: Some(vec![SortSpec{ field: "age".into(), order: Order::Desc }]), limit: Some(2), skip: Some(0), timeout_ms: None };
-    let cur = find_docs(&&col, &filter, &opts);
+    let cur = find_docs(&col, &filter, &opts);
     let docs = cur.to_vec();
     assert_eq!(docs.len(), 2);
     assert_eq!(docs[0].data.0.get_str("name").unwrap(), "bob");
     assert_eq!(docs[1].data.0.get_str("name").unwrap(), "carol");
 
-    let cnt = count_docs(&&col, &Filter::Cmp { path: "age".into(), op: CmpOp::Gt, value: 30.into() });
+    let cnt = count_docs(&col, &Filter::Cmp { path: "age".into(), op: CmpOp::Gt, value: 30.into() });
     assert_eq!(cnt, 2);
 }
 

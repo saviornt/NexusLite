@@ -68,31 +68,27 @@ pub struct HashIndex {
 impl HashIndex {
     pub fn new(field: String) -> Self { Self { field, map: HashMap::new(), stats: IndexStats::default() } }
     pub fn insert(&mut self, doc: &BsonDocument, id: &DocumentId) {
-        if let Some(v) = get_path(doc, &self.field) {
-            if let Some(k) = key_from_bson(v).map(EqKey) {
-                let set = self.map.entry(k).or_insert_with(HashSet::new);
-                if set.insert(id.clone()) { self.stats.entries += 1; }
-                self.stats.keys = self.map.len();
-            }
+        if let Some(v) = get_path(doc, &self.field)
+            && let Some(k) = key_from_bson(v).map(EqKey) {
+            let set = self.map.entry(k).or_default();
+            if set.insert(id.clone()) { self.stats.entries += 1; }
+            self.stats.keys = self.map.len();
         }
     }
     pub fn remove(&mut self, doc: &BsonDocument, id: &DocumentId) {
-        if let Some(v) = get_path(doc, &self.field) {
-            if let Some(k) = key_from_bson(v).map(EqKey) {
-                if let Some(set) = self.map.get_mut(&k) {
-                    if set.remove(id) { self.stats.entries = self.stats.entries.saturating_sub(1); }
-                    if set.is_empty() { self.map.remove(&k); }
-                    self.stats.keys = self.map.len();
-                }
-            }
+        if let Some(v) = get_path(doc, &self.field)
+            && let Some(k) = key_from_bson(v).map(EqKey)
+            && let Some(set) = self.map.get_mut(&k) {
+            if set.remove(id) { self.stats.entries = self.stats.entries.saturating_sub(1); }
+            if set.is_empty() { self.map.remove(&k); }
+            self.stats.keys = self.map.len();
         }
     }
     pub fn lookup_eq(&mut self, v: &Bson) -> Option<Vec<DocumentId>> {
-        if let Some(k) = key_from_bson(v).map(EqKey) {
-            if let Some(set) = self.map.get(&k) {
-                self.stats.hits += 1;
-                return Some(set.iter().cloned().collect());
-            }
+        if let Some(k) = key_from_bson(v).map(EqKey)
+            && let Some(set) = self.map.get(&k) {
+            self.stats.hits += 1;
+            return Some(set.iter().cloned().collect());
         }
         self.stats.misses += 1;
         None
@@ -109,23 +105,20 @@ pub struct BTreeIndex {
 impl BTreeIndex {
     pub fn new(field: String) -> Self { Self { field, map: BTreeMap::new(), stats: IndexStats::default() } }
     pub fn insert(&mut self, doc: &BsonDocument, id: &DocumentId) {
-        if let Some(v) = get_path(doc, &self.field) {
-            if let Some(k) = key_from_bson(v).map(OrdKey) {
-                let set = self.map.entry(k).or_insert_with(BTreeSet::new);
-                if set.insert(id.clone()) { self.stats.entries += 1; }
-                self.stats.keys = self.map.len();
-            }
+        if let Some(v) = get_path(doc, &self.field)
+            && let Some(k) = key_from_bson(v).map(OrdKey) {
+            let set = self.map.entry(k).or_default();
+            if set.insert(id.clone()) { self.stats.entries += 1; }
+            self.stats.keys = self.map.len();
         }
     }
     pub fn remove(&mut self, doc: &BsonDocument, id: &DocumentId) {
-        if let Some(v) = get_path(doc, &self.field) {
-            if let Some(k) = key_from_bson(v).map(OrdKey) {
-                if let Some(set) = self.map.get_mut(&k) {
-                    if set.remove(id) { self.stats.entries = self.stats.entries.saturating_sub(1); }
-                    if set.is_empty() { self.map.remove(&k); }
-                    self.stats.keys = self.map.len();
-                }
-            }
+        if let Some(v) = get_path(doc, &self.field)
+            && let Some(k) = key_from_bson(v).map(OrdKey)
+            && let Some(set) = self.map.get_mut(&k) {
+            if set.remove(id) { self.stats.entries = self.stats.entries.saturating_sub(1); }
+            if set.is_empty() { self.map.remove(&k); }
+            self.stats.keys = self.map.len();
         }
     }
     pub fn lookup_range(&mut self, min: Option<&Bson>, max: Option<&Bson>, inclusive_min: bool, inclusive_max: bool) -> Option<Vec<DocumentId>> {
@@ -194,8 +187,7 @@ pub fn lookup_eq(mgr: &mut IndexManager, field: &str, v: &Bson) -> Option<Vec<Do
         Some(IndexImpl::Hash(h)) => h.lookup_eq(v),
         Some(IndexImpl::BTree(b)) => {
             // Equality via BTree exact bound
-            let docs = b.lookup_range(Some(v), Some(v), true, true);
-            docs
+            b.lookup_range(Some(v), Some(v), true, true)
         }
         _ => None,
     }

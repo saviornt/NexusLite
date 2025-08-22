@@ -10,8 +10,7 @@ async fn test_import_ndjson_basic() {
     let wal_path = dir.path().join("wal.log");
     let engine = Engine::new(wal_path).unwrap();
     let data = "{\"name\":\"alice\"}\n{\"name\":\"bob\"}\n";
-    let mut opts = ImportOptions::default();
-    opts.collection = "users".into();
+    let opts = ImportOptions { collection: "users".into(), ..Default::default() };
     let report = import_from_reader(&engine, Cursor::new(data.as_bytes()), ImportFormat::Ndjson, &opts).unwrap();
     assert_eq!(report.inserted, 2);
     let col = engine.get_collection("users").unwrap();
@@ -24,9 +23,7 @@ async fn test_import_csv_headers() {
     let wal_path = dir.path().join("wal.log");
     let engine = Engine::new(wal_path).unwrap();
     let data = "name,age\nalice,30\n";
-    let mut opts = ImportOptions::default();
-    opts.collection = "users".into();
-    opts.format = ImportFormat::Csv;
+    let opts = ImportOptions { collection: "users".into(), format: ImportFormat::Csv, ..Default::default() };
     let report = import_from_reader(&engine, Cursor::new(data.as_bytes()), ImportFormat::Csv, &opts).unwrap();
     assert_eq!(report.inserted, 1);
 }
@@ -43,9 +40,7 @@ fn test_import_ndjson_array_mode() {
         let mut f = std::fs::File::create(&data).unwrap();
         write!(f, "[{{\"a\":1}},{{\"a\":2}}]").unwrap();
     }
-    let mut opts = ImportOptions::default();
-    opts.collection = col.into();
-    opts.format = ImportFormat::Ndjson;
+    let mut opts = ImportOptions { collection: col.into(), format: ImportFormat::Ndjson, ..Default::default() };
     opts.json.array_mode = true;
     let rep = import_file(&engine, &data, &opts).unwrap();
     assert_eq!(rep.inserted, 2);
@@ -69,14 +64,12 @@ fn test_import_bson_and_export_bson_roundtrip() {
         let mut b2 = Vec::new(); d2.to_writer(&mut b2).unwrap();
         f.write_all(&b1).unwrap(); f.write_all(&b2).unwrap();
     }
-    let mut iopts = ImportOptions::default();
-    iopts.collection = col.into();
-    iopts.format = ImportFormat::Bson;
+    let iopts = ImportOptions { collection: col.into(), format: ImportFormat::Bson, ..Default::default() };
     let rep = import_file(&engine, &path, &iopts).unwrap();
     assert_eq!(rep.inserted, 2);
     // Export
     let out = dir.path().join("out.bson");
-    let mut eopts = ExportOptions::default(); eopts.format = ExportFormat::Bson;
+    let eopts = ExportOptions { format: ExportFormat::Bson, ..Default::default() };
     let erep = export_file(&engine, col, &out, &eopts).unwrap();
     assert_eq!(erep.written, 2);
     // Re-read
@@ -100,14 +93,12 @@ fn test_import_csv_type_infer() {
         writeln!(f, "a,b").unwrap();
         writeln!(f, "1,true").unwrap();
     }
-    let mut opts = ImportOptions::default();
-    opts.collection = col.into();
-    opts.format = ImportFormat::Csv;
+    let mut opts = ImportOptions { collection: col.into(), format: ImportFormat::Csv, ..Default::default() };
     opts.csv.type_infer = true;
     let rep = import_file(&engine, &csvp, &opts).unwrap();
     assert_eq!(rep.inserted, 1);
     let c = engine.get_collection(col).unwrap();
     let docs = c.get_all_documents();
     assert_eq!(docs[0].data.0.get_i64("a").unwrap(), 1);
-    assert_eq!(docs[0].data.0.get_bool("b").unwrap(), true);
+    assert!(docs[0].data.0.get_bool("b").unwrap());
 }

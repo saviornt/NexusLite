@@ -34,8 +34,7 @@ fn test_timeout_best_effort() {
     }
     // Use a filter that forces a scan; set tiny timeout
     let f = Filter::Cmp { path: "i".into(), op: CmpOp::Gte, value: 0.into() };
-    let mut opts = FindOptions::default();
-    opts.timeout_ms = Some(1);
+    let opts = FindOptions { timeout_ms: Some(1), ..Default::default() };
     let cur = query::find_docs(&col, &f, &opts);
     let docs = cur.to_vec();
     assert!(docs.len() < 2000);

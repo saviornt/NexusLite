@@ -3,6 +3,10 @@ use proptest::prelude::*;
 use nexus_lite::query::{eval_filter, Filter, CmpOp};
 
 proptest! {
+    #![proptest_config(proptest::test_runner::Config {
+        failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::WithSource("proptest-regressions"))),
+        .. proptest::test_runner::Config::default()
+    })]
     // Symmetry: bson_equal(a,b) == bson_equal(b,a); implied via eval on Eq op
     #[test]
     fn prop_eq_symmetry(v in any_bson_number(), w in any_bson_number()) {
@@ -39,6 +43,10 @@ fn any_bson_number() -> impl Strategy<Value = Bson> {
 }
 
 proptest! {
+    #![proptest_config(proptest::test_runner::Config {
+        failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::WithSource("proptest-regressions"))),
+        .. proptest::test_runner::Config::default()
+    })]
     #[test]
     fn prop_projection_preserves_selected_fields(a in any::<i64>(), b in any::<i64>()) {
         use nexus_lite::query::{FindOptions, SortSpec, Order};
@@ -48,7 +56,7 @@ proptest! {
         let col = engine.create_collection("proj".into());
         col.insert_document(nexus_lite::document::Document::new(bson::doc!{"x": a, "y": b, "z": 1}, nexus_lite::document::DocumentType::Persistent));
         let opts = FindOptions { projection: Some(vec!["x".into(), "y".into()]), sort: Some(vec![SortSpec{ field: "x".into(), order: Order::Asc }]), limit: Some(1), skip: Some(0), timeout_ms: None };
-        let cur = nexus_lite::query::find_docs(&&col, &nexus_lite::query::Filter::True, &opts);
+    let cur = nexus_lite::query::find_docs(&col, &nexus_lite::query::Filter::True, &opts);
         let docs = cur.to_vec();
         prop_assert_eq!(docs.len(), 1);
         let d = &docs[0].data.0;
@@ -65,7 +73,7 @@ proptest! {
         let col = engine.create_collection("pag".into());
         for i in 0..n { col.insert_document(nexus_lite::document::Document::new(bson::doc!{"i": i as i64}, nexus_lite::document::DocumentType::Persistent)); }
         let opts = nexus_lite::query::FindOptions { projection: None, sort: None, limit: Some(50), skip: Some(usize::MAX/2), timeout_ms: None };
-        let cur = nexus_lite::query::find_docs(&&col, &nexus_lite::query::Filter::True, &opts);
+    let cur = nexus_lite::query::find_docs(&col, &nexus_lite::query::Filter::True, &opts);
         let docs = cur.to_vec();
         // With huge skip, result must be empty, not panic
         prop_assert!(docs.len() <= 50);

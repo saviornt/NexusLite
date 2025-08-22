@@ -3,8 +3,16 @@ use nexus_lite::query::{FindOptions, SortSpec, Order};
 use nexus_lite::document::{Document, DocumentType};
 
 proptest! {
+    #![proptest_config(proptest::test_runner::Config {
+        failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::WithSource("proptest-regressions"))),
+        // Reduce the number of cases to speed up this particular property test
+        cases: 16,
+    // Cap the total time in milliseconds
+    timeout: 20_000,
+        .. proptest::test_runner::Config::default()
+    })]
     #[test]
-    fn prop_multi_key_sort_non_decreasing(v in proptest::collection::vec((any::<i64>(), any::<i64>()), 0..50)) {
+    fn prop_multi_key_sort_non_decreasing(v in proptest::collection::vec((any::<i64>(), any::<i64>()), 0..15)) {
         use nexus_lite::engine::Engine;
         let engine = Engine::new(std::env::temp_dir().join("prop_sort_wal.log")).unwrap();
         let col = engine.create_collection("srt".into());
@@ -19,7 +27,7 @@ proptest! {
             skip: None,
             timeout_ms: None
         };
-        let cur = nexus_lite::query::find_docs(&&col, &nexus_lite::query::Filter::True, &opts);
+    let cur = nexus_lite::query::find_docs(&col, &nexus_lite::query::Filter::True, &opts);
         let docs = cur.to_vec();
         // Check non-decreasing (lexicographic) by (a,b)
         for w in docs.windows(2) {

@@ -83,7 +83,7 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             if pbe_db || pbe_wasp {
                 let username = std::env::var("NEXUSLITE_USERNAME").map_err(|_| "PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD")?;
                 let password = std::env::var("NEXUSLITE_PASSWORD").map_err(|_| "PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD")?;
-                crate::api::decrypt_db_with_password(&db_path.as_path(), &username, &password)?;
+                crate::api::decrypt_db_with_password(db_path.as_path(), &username, &password)?;
             }
             let db = crate::Database::open(p)?;
             println!("opened name={}", db.name());
@@ -113,22 +113,18 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             Ok(())
         }
         Command::Import { collection, file, format } => {
-            let mut opts = ImportOptions::default();
-            opts.collection = collection;
-            opts.format = parse_import_format(&format);
+            let opts = ImportOptions { collection, format: parse_import_format(&format), ..Default::default() };
             let _report = import_file(engine, file, &opts)?;
             Ok(())
         }
         Command::Export { collection, file, format } => {
-            let mut opts = ExportOptions::default();
-            opts.format = parse_export_format(&format);
+            let opts = ExportOptions { format: parse_export_format(&format), ..Default::default() };
             let _report = export_file(engine, &collection, file, &opts)?;
             Ok(())
         }
         Command::ExportR { collection, file, format, redact_fields } => {
-            let mut opts = ExportOptions::default();
-            opts.format = parse_export_format(&format);
-            if let Some(fields) = redact_fields { if !fields.is_empty() { opts.redact_fields = Some(fields); } }
+            let mut opts = ExportOptions { format: parse_export_format(&format), ..Default::default() };
+            if let Some(fields) = redact_fields && !fields.is_empty() { opts.redact_fields = Some(fields); }
             let _report = export_file(engine, &collection, file, &opts)?;
             Ok(())
         }
@@ -231,9 +227,7 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             let value: serde_json::Value = serde_json::from_str(&json)?;
             let bdoc: bson::Document = bson::to_document(&value)?;
             let mut doc = crate::document::Document::new(bdoc, if ephemeral { crate::document::DocumentType::Ephemeral } else { crate::document::DocumentType::Persistent });
-            if ephemeral {
-                if let Some(secs) = ttl_secs { doc.set_ttl(std::time::Duration::from_secs(secs)); }
-            }
+            if ephemeral && let Some(secs) = ttl_secs { doc.set_ttl(std::time::Duration::from_secs(secs)); }
             let id = col.insert_document(doc);
             println!("{}", id.0);
             Ok(())
@@ -301,13 +295,13 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
         }
         Command::CryptoEncryptFile { key_pub, input, output } => {
             let pub_pem = std::fs::read_to_string(&key_pub)?;
-            crate::api::crypto_encrypt_file(&pub_pem, &input.as_path(), &output.as_path())?;
+            crate::api::crypto_encrypt_file(&pub_pem, input.as_path(), output.as_path())?;
             println!("encrypted: {} -> {}", input.to_string_lossy(), output.to_string_lossy());
             Ok(())
         }
         Command::CryptoDecryptFile { key_priv, input, output } => {
             let priv_pem = std::fs::read_to_string(&key_priv)?;
-            crate::api::crypto_decrypt_file(&priv_pem, &input.as_path(), &output.as_path())?;
+            crate::api::crypto_decrypt_file(&priv_pem, input.as_path(), output.as_path())?;
             println!("decrypted: {} -> {}", input.to_string_lossy(), output.to_string_lossy());
             Ok(())
         }
@@ -315,25 +309,25 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             let db_path_str = db_path.to_str().ok_or("invalid db path")?;
             let db = crate::Database::open(db_path_str)?;
             let pub_pem = std::fs::read_to_string(&key_pub)?;
-            crate::api::checkpoint_encrypted(&db, &output.as_path(), &pub_pem)?;
+            crate::api::checkpoint_encrypted(&db, output.as_path(), &pub_pem)?;
             println!("checkpoint_encrypted: {}", output.to_string_lossy());
             Ok(())
         }
         Command::RestoreEncrypted { db_path, key_priv, input } => {
             let priv_pem = std::fs::read_to_string(&key_priv)?;
-            crate::api::restore_encrypted(&db_path.as_path(), &input.as_path(), &priv_pem)?;
+            crate::api::restore_encrypted(db_path.as_path(), input.as_path(), &priv_pem)?;
             println!("restored_encrypted: {}", db_path.to_string_lossy());
             Ok(())
         }
         Command::EncryptDbPbe { db_path, username } => {
             let password = std::env::var("NEXUSLITE_PASSWORD").map_err(|_| "missing NEXUSLITE_PASSWORD env")?;
-            crate::api::encrypt_db_with_password(&db_path.as_path(), &username, &password)?;
+            crate::api::encrypt_db_with_password(db_path.as_path(), &username, &password)?;
             println!("encrypted (PBE): {}", db_path.to_string_lossy());
             Ok(())
         }
         Command::DecryptDbPbe { db_path, username } => {
             let password = std::env::var("NEXUSLITE_PASSWORD").map_err(|_| "missing NEXUSLITE_PASSWORD env")?;
-            crate::api::decrypt_db_with_password(&db_path.as_path(), &username, &password)?;
+            crate::api::decrypt_db_with_password(db_path.as_path(), &username, &password)?;
             println!("decrypted (PBE): {}", db_path.to_string_lossy());
             Ok(())
         }
@@ -342,21 +336,15 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             let db_sig = db_path.with_extension("db.sig");
             let wasp_sig = wasp.with_extension("wasp.sig");
             let mut failed = false;
-            if db_sig.exists() {
-                if let Ok(sig) = std::fs::read(&db_sig) {
-                    if crate::api::crypto_verify_file(&key_pub_pem, &db_path, &sig).unwrap_or(false) == false {
-                        eprintln!("SIGNATURE VERIFICATION FAILED: {}", db_path.display());
-                        failed = true;
-                    }
-                }
+            if db_sig.exists() && let Ok(sig) = std::fs::read(&db_sig)
+                && !crate::api::crypto_verify_file(&key_pub_pem, &db_path, &sig).unwrap_or(false) {
+                eprintln!("SIGNATURE VERIFICATION FAILED: {}", db_path.display());
+                failed = true;
             }
-            if wasp.exists() && wasp_sig.exists() {
-                if let Ok(sig) = std::fs::read(&wasp_sig) {
-                    if crate::api::crypto_verify_file(&key_pub_pem, &wasp, &sig).unwrap_or(false) == false {
-                        eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
-                        failed = true;
-                    }
-                }
+            if wasp.exists() && wasp_sig.exists() && let Ok(sig) = std::fs::read(&wasp_sig)
+                && !crate::api::crypto_verify_file(&key_pub_pem, &wasp, &sig).unwrap_or(false) {
+                eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
+                failed = true;
             }
             if failed { Err("signature verification failed".into()) } else { Ok(()) }
         }

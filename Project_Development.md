@@ -9,8 +9,17 @@ NexusLite is an embedded **NoSQL database engine**, inspired by the best feature
 We’ll follow an **iterative AGILE approach** where each sprint adds working, testable functionality.  
 Future features will always build on stable, well-tested foundations.
 
-**Notes:**
+## Linting & Coding Standards
 
+- Run clippy locally and deny warnings to keep the codebase clean:
+
+```powershell
+cargo clippy -q --all-targets --all-features -- -D warnings
+```
+
+- Common lint to avoid: needless reference of operands in comparisons (`clippy::op-ref`).
+  - Prefer `bytes[0..4] != SNAPSHOT_MAGIC` over `&bytes[0..4] != SNAPSHOT_MAGIC`.
+- CI also denies warnings; only add targeted `#[allow(...)]` when justified and scoped.
 - Design with concurrency in mind using `RwLock` from the start.
 - Design with async in mind using `tokio` for both network and file-based async I/O.
 - Design modules with error handling and logging using the `thiserror`, `log`, and `log4rs` crates.
@@ -278,7 +287,7 @@ Future features will always build on stable, well-tested foundations.
   - [x] Integration: import sample → queries → updates → exports
   - [x] CLI: parse/execute filters/updates; stream output fixtures
 
-- [ ] Documentation
+- [x] Documentation
   - [x] README: add “Query & Update” examples (Rust + CLI)
   - [x] Project_Development.md: finalize Sprint 5 spec and checklists
 
@@ -348,22 +357,36 @@ Future features will always build on stable, well-tested foundations.
 
 - [x] Perform a complete review and update for both the `README.md` and `Project_Development.md` documentation.
 
-- [ ] Memory and concurrency safety
-  - [ ] Concurrency tests (basic loom model or stress tests) for lock ordering
-  - [ ] Cursor-based iteration in core paths to avoid large clones
-  - [ ] Optional sanitizer/miri runs in CI where feasible (nightly job)
-  - [ ] Ensure that the codebase is highly optimized and free of unnecessary allocations.
-  - [ ] Ensure that thread / CPU concurrency and asynchronous file I/O is being used properly to ensure optimal performance and reliability.
+- [x] Memory and concurrency safety
+  - [x] Concurrency tests (basic loom model or stress tests) for lock ordering
+    - Implemented a stress test (`tests/mod_concurrency.rs::concurrent_insert_read_update_stress`) that exercises parallel inserts/reads/updates and validates invariants; passed in the full suite.
+  - [x] Cursor-based iteration in core paths to avoid large clones
+    - Added a lazy, ID-based iteration path in `src/query.rs::find_docs` with `Collection::list_ids()` to avoid materializing full documents when projection/sort aren’t requested; validated by existing query tests.
+  - [x] Optional sanitizer/miri runs in CI where feasible (nightly job)
+  - [x] Ensure that the codebase is highly optimized and free of unnecessary allocations.
+    - Streamed exports (NDJSON/CSV/BSON) iterate IDs and fetch on-demand, avoiding large Vec clones.
+  - [x] Ensure that thread / CPU concurrency and asynchronous file I/O is being used properly to ensure optimal performance and reliability.
+    - Added concurrent export test using spawn_blocking to isolate blocking I/O; file writes remain atomic with retries on Windows.
 
-- [ ] File I/O safety
-  - [ ] Use `tempfile::NamedTempFile` for atomic writes (avoid symlink races)
-  - [ ] Path normalization and validation; explicit permissions where applicable
-  - [ ] Retry/backoff strategy around Windows file locks, prefer short retries with jitter
-  - [ ] Expand file I/O hardening with explicit permissions on creation where applicable and targeted Windows retry/backoff around renames
-  - [ ] Embed DB format version and magic; refuse downgrade and log upgrade path
+- [x] File I/O safety
+  - [x] Use `tempfile::NamedTempFile` for atomic writes (avoid symlink races)
+  - [x] Path normalization and validation; explicit permissions where applicable
+    - New `fsutil::normalize_db_path` ensures `.db` extension and absolute path; used by `Database::new/open/close`.
+    - New `fsutil::create_secure` creates files with restrictive permissions (0o600 on Unix; default ACLs on Windows).
+  - [x] Retry/backoff strategy around Windows file locks, prefer short retries with jitter
+  - [x] Expand file I/O hardening with explicit permissions on creation where applicable and targeted Windows retry/backoff around renames
+    - Exports write to temp and atomically persist with Windows-friendly retries; WASP checkpoint writes directly on Windows to avoid rename sharing violations.
+  - [x] Embed DB snapshot format version and magic; refuse newer versions and document the policy
+    - `.db` snapshot now uses header: magic `NXL1` + `u32` version (current 1) + `DbSnapshot` payload; legacy raw `DbSnapshot` without a header is not supported in this initial build.
+    - If a newer version is encountered, decoding returns `io::ErrorKind::Unsupported` (no panic). A new negative test asserts this behavior.
+  - [x] Create tests as needed, run all tests, and fix any identified issues
+    - Added `snapshot_newer_version_errors_gracefully` in `tests/mod_snapshot.rs` to validate error path for future-version snapshots.
+  - [x] Update documentation as needed
+    - README updated with snapshot format/versioning and compatibility policy.
 
 - [ ] Additional Testing/CI
-  - [ ] Add mutation testing (e.g., with `mutagen` or `cargo-mutants`) to catch logic holes
+  - [ ] Add mutation testing (e.g., with `mutagen` or `cargo-mutants`) to catch logic holes and fix any identified issues.
+  - [ ] Update documentation as needed.
 
 - [ ] Observability and abuse resistance
   - [ ] Structured query logs with redaction for sensitive fields
@@ -378,6 +401,8 @@ Future features will always build on stable, well-tested foundations.
     - [ ] Slow query log format stability: include fields {timestamp, db, collection, filter_hash, duration_ms, limit, skip}; treat names as stable for MVP
   - [ ] Metrics naming stability: document metric names in docs and consider them stable for MVP
   - [ ] Implement a robust logging system that can be configured (logging level, format, destination) using a configuration file, the API or the CLI. The logging system should support structured logging and allow for easy integration with external monitoring tools.
+  - [ ] Create tests as needed,and perform all tests and fix any identified issues.
+  - [ ] Update documentation as needed.
 
 - [ ] Feature flags
   - [ ] Publish supported feature flags: `crypto-ecc`, `crypto-pqc` (future), `prometheus`, `regex`, `cli-bin`
@@ -526,13 +551,17 @@ nexus_lite
 │   ├── mod_import.rs
 │   ├── mod_index.rs
 │   ├── mod_lib.rs
-│   ├── mod_queries.rs
+│   ├── mod_query.rs
 │   ├── mod_types.rs
 │   ├── mod_wal.rs
 │   └── mod_wasp.rs
 ├── .gitignore
 ├── Cargo.lock
-└── README.md
+├── Cargo.toml
+├── README.md
+└── Project_Development.md
+```
+
 ---
 
 ## Modules (alignment)
@@ -559,6 +588,19 @@ Below is a quick reference for the modules and their current responsibilities.
 
 ---
 
+## On-disk snapshot format & compatibility
+
+We introduced a lightweight header in the `.db` snapshot format:
+
+- Magic: `NXL1` (4 bytes)
+- Version: `u32` (currently 1)
+- Payload: bincode `DbSnapshot`
+
+Readers accept both the wrapped and legacy (payload-only) encodings. If the on-disk version is greater than the current, decoding returns `io::ErrorKind::Unsupported`. This is intentionally non-fatal for `Database::open/new` (best-effort index rebuild scanning), but the lower-level decode helper surfaces the error for tools/tests.
+Readers now require the header; legacy payload-only snapshots are not supported. If the on-disk version is greater than the current, decoding returns `io::ErrorKind::Unsupported` (no panic).
+
+---
+
 ## PQC roadmap and alignment
 
 - Goals: Add hybrid PQC support while maintaining ECC paths. Keep crypto optional via feature flags and minimize public surface changes.
@@ -567,9 +609,6 @@ Below is a quick reference for the modules and their current responsibilities.
 - Phasing: start with encrypted checkpoint hybrid, then optional at-rest hybrid for `.db`/`.wasp`, then PQC signatures for `.sig` files.
 - Tests: add vectors, round-trip, and tamper tests under `crypto-pqc` feature; CI matrix includes ECC-only and hybrid.
 - Policy: signature enforcement selectable (warn vs hard-fail) in CLI and config; defaults conservative.
-├── Cargo.toml
-└── Project_Development.md
-```
 
 ---
 
@@ -619,6 +658,15 @@ Below is a quick reference for the modules and their current responsibilities.
   - Used as an alternative pluggable backend for benchmarking
 
 ### WASP Module: wasp.rs
+
+- Purpose: Default persistence engine using Write-Ahead Shadow-Paging (WASP).
+- Features:
+  - Copy-on-write page tree with checksums
+  - Double-buffered manifest with atomic pointer flip
+  - Tiny WAL integration for commit ordering
+  - Immutable segment store with bloom filters
+  - Background compaction and space reclaim (GC)
+  - Snapshot/MVCC-friendly read path
 
 ### Types Module: types.rs
 
@@ -697,7 +745,7 @@ Below is a quick reference for the modules and their current responsibilities.
 - Purpose: User-facing database wrapper around Engine with ergonomic helpers.
 - Features:
   - `Database::new(name_or_path: Option<&str>)` creates `.db` (defaulting to `.db` extension) and `.wasp` if missing
-  - `Database::open(name_or_path: Option<&str>)` opens existing `.db`, creating `.wasp` if missing; errors `Database Not Found` otherwise
+  - `Database::open(name_or_path: &str)` opens existing `.db`, creating `.wasp` if missing; errors `Database Not Found` otherwise
   - `Database::close(name_or_path: Option<&str>)` unregisters/"closes" an open DB handle
   - Collection management: create/get/delete, list names
   - Document helpers: insert/update/delete

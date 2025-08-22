@@ -18,7 +18,7 @@ fn test_open_pbe_env_missing() {
     }
     // Encrypt with username/password
     unsafe { std::env::set_var("NEXUSLITE_PASSWORD", "secret"); }
-    nexus_lite::api::encrypt_db_with_password(&db_path.as_path(), "user", "secret").unwrap();
+    nexus_lite::api::encrypt_db_with_password(db_path.as_path(), "user", "secret").unwrap();
     unsafe { std::env::remove_var("NEXUSLITE_PASSWORD"); }
 
     // Now try to open via CLI programmatic without env; should error

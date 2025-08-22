@@ -21,9 +21,10 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(wal_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let wal = Wal::new(wal_path)?;
-        // Resolve and cache metadata path at engine creation to avoid env var races in tests
-        let metadata_path = if let Ok(p) = std::env::var("NEXUS_INDEX_META") { PathBuf::from(p) } else { PathBuf::from("nexus_indexes.json") };
+    let wal = Wal::new(wal_path)?;
+    // Resolve and cache metadata path at engine creation to avoid env var races in tests
+    let metadata_path = if let Ok(p) = std::env::var("NEXUS_INDEX_META") { PathBuf::from(p) } else { PathBuf::from("nexus_indexes.json") };
+    let metadata_path = if metadata_path.is_absolute() { metadata_path } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(metadata_path) };
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
             storage: Arc::new(RwLock::new(Box::new(wal))),
@@ -97,6 +98,7 @@ impl Engine {
     let wasp = Wasp::new(path)?;
     // Resolve and cache metadata path at engine creation to avoid env var races in tests
     let metadata_path = if let Ok(p) = std::env::var("NEXUS_INDEX_META") { PathBuf::from(p) } else { PathBuf::from("nexus_indexes.json") };
+    let metadata_path = if metadata_path.is_absolute() { metadata_path } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(metadata_path) };
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
             storage: Arc::new(RwLock::new(Box::new(wasp))),
@@ -116,16 +118,11 @@ impl Engine {
         let temp_collection = self.create_collection("_tempDocuments".to_string());
         let storage = self.storage.read();
         let operations = storage.read_all()?;
-        for op in operations {
-            if let Ok(operation) = op {
-                match operation {
-                    crate::types::Operation::Insert { document } => {
-                        if document.metadata.document_type == DocumentType::Ephemeral {
-                            temp_collection.cache.insert(document);
-                        }
-                    }
-                    _ => {}
-                }
+        for operation in operations.into_iter().flatten() {
+            if let crate::types::Operation::Insert { document } = operation
+                && document.metadata.document_type == DocumentType::Ephemeral
+            {
+                temp_collection.cache.insert(document);
             }
         }
         Ok(())
@@ -187,13 +184,12 @@ impl Engine {
 
     fn load_collection_indexes(&self, col: &Arc<Collection>) {
         let path = self.indexes_meta_path();
-        if let Ok(bytes) = fs::read(&path) {
-            if let Ok(meta) = serde_json::from_slice::<IndexesMetadata>(&bytes) {
-                if meta.version != INDEX_METADATA_VERSION { return; }
-                let name = col.name_str();
-                if let Some(descs) = meta.collections.get(&name) {
-                    for d in descs { col.create_index(&d.field, d.kind); }
-                }
+        if let Ok(bytes) = fs::read(&path)
+            && let Ok(meta) = serde_json::from_slice::<IndexesMetadata>(&bytes) {
+            if meta.version != INDEX_METADATA_VERSION { return; }
+            let name = col.name_str();
+            if let Some(descs) = meta.collections.get(&name) {
+                for d in descs { col.create_index(&d.field, d.kind); }
             }
         }
     }

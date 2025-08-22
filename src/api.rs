@@ -36,9 +36,9 @@ pub fn db_open(db_path: &str) -> Result<crate::Database, DbError> {
                 return Err(DbError::Io("PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD".into()));
             }
         }
-        crate::crypto::pbe_is_encrypted(&pb).then(|| ());
-        crate::crypto::pbe_is_encrypted(&wasp).then(|| ());
-        crate::api::decrypt_db_with_password(&pb.as_path(), &username, &password)?;
+    crate::crypto::pbe_is_encrypted(&pb).then_some(());
+    crate::crypto::pbe_is_encrypted(&wasp).then_some(());
+    crate::api::decrypt_db_with_password(pb.as_path(), &username, &password)?;
     }
     crate::Database::open(db_path).map_err(|e| DbError::Io(e.to_string()))
 }
@@ -124,9 +124,7 @@ pub fn create_document(engine: &Engine, collection: Option<&str>, json: &str, ep
     let val: serde_json::Value = serde_json::from_str(json).map_err(|e| DbError::Io(e.to_string()))?;
     let bdoc: bson::Document = bson::to_document(&val).map_err(|e| DbError::Io(e.to_string()))?;
     let mut doc = Document::new(bdoc, if ephemeral { DocumentType::Ephemeral } else { DocumentType::Persistent });
-    if ephemeral {
-        if let Some(s) = ttl_secs { doc.set_ttl(std::time::Duration::from_secs(s)); }
-    }
+    if ephemeral && let Some(s) = ttl_secs { doc.set_ttl(std::time::Duration::from_secs(s)); }
     Ok(col.insert_document(doc))
 }
 

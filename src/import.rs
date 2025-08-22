@@ -139,16 +139,19 @@ fn import_ndjson<R: Read>(collection: std::sync::Arc<crate::collection::Collecti
         }
         return Ok(());
     }
-    let reader = BufReader::new(reader);
+    let mut reader = BufReader::new(reader);
     let mut line_no: usize = 0;
     let mut sidecar = match &opts.error_sidecar {
         Some(p) if opts.skip_errors => Some(File::create(p)?),
         _ => None,
     };
-    for line in reader.lines() {
-        let line = line?;
+    let mut buf = String::with_capacity(8 * 1024);
+    loop {
+        buf.clear();
+        let n = reader.read_line(&mut buf)?;
+        if n == 0 { break; }
         line_no += 1;
-        let line = line.trim();
+        let line = buf.trim();
         if line.is_empty() { continue; }
         match serde_json::from_str::<serde_json::Value>(line) {
             Ok(v) => {
@@ -157,7 +160,7 @@ fn import_ndjson<R: Read>(collection: std::sync::Arc<crate::collection::Collecti
                 apply_ttl(&mut d, &bdoc, &opts.ttl_field);
                 collection.insert_document(d);
                 report.inserted += 1;
-                if let Some(n) = opts.progress_every { if line_no % n == 0 { log::info!("imported {} records (ndjson)", report.inserted); } }
+                if let Some(n) = opts.progress_every && line_no % n == 0 { log::info!("imported {} records (ndjson)", report.inserted); }
             }
             Err(e) => {
                 if let Some(f) = sidecar.as_mut() {
@@ -189,7 +192,7 @@ fn import_csv<R: Read>(collection: std::sync::Arc<crate::collection::Collection>
             if let Some(f) = sidecar.as_mut() { let _ = writeln!(f, "{{\"row\":{},\"error\":\"{}\"}}", row_no, escape_json(&e.to_string())); }
             if opts.skip_errors { report.skipped += 1; continue; } else { return Err(io::Error::new(io::ErrorKind::InvalidData, e)); }
         } };
-        let mut map = BsonDocument::new();
+    let mut map = BsonDocument::new();
         if opts.csv.has_headers && !headers.is_empty() {
             for (i, field) in rec.iter().enumerate() {
                 let key = headers.get(i).cloned().unwrap_or_else(|| format!("field_{i}"));
@@ -203,8 +206,8 @@ fn import_csv<R: Read>(collection: std::sync::Arc<crate::collection::Collection>
         let mut d = Document::new(map.clone(), doc_type.clone());
         apply_ttl(&mut d, &map, &opts.ttl_field);
         collection.insert_document(d);
-        report.inserted += 1;
-        if let Some(n) = opts.progress_every { if row_no % n == 0 { log::info!("imported {} records (csv)", report.inserted); } }
+    report.inserted += 1;
+    if let Some(n) = opts.progress_every && row_no % n == 0 { log::info!("imported {} records (csv)", report.inserted); }
     }
     Ok(())
 }
@@ -221,14 +224,20 @@ fn field_to_bson(field: &str, infer: bool) -> bson::Bson {
 }
 
 fn import_bson<R: Read>(collection: std::sync::Arc<crate::collection::Collection>, mut reader: R, doc_type: DocumentType, _opts: &ImportOptions, report: &mut ImportReport) -> io::Result<()> {
+    let mut full = Vec::with_capacity(4096);
     loop {
         let mut len_buf = [0u8; 4];
         if reader.read_exact(&mut len_buf).is_err() { break; }
         let len = i32::from_le_bytes(len_buf);
         if len <= 0 || len > 16_000_000 { return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid bson size")); }
-        let mut buf = vec![0u8; len as usize - 4];
-        reader.read_exact(&mut buf)?;
-        let mut full = len_buf.to_vec(); full.extend_from_slice(&buf);
+        let len = len as usize;
+        if full.capacity() < len { full.reserve(len - full.capacity()); }
+        full.clear();
+        // Extend to full length and fill
+        full.extend_from_slice(&len_buf);
+        let start = full.len();
+        full.resize(len, 0);
+        reader.read_exact(&mut full[start..])?;
         match bson::Document::from_reader(&mut &full[..]) {
             Ok(doc) => {
                 let mut d = Document::new(doc.clone(), doc_type.clone());
@@ -245,16 +254,15 @@ fn import_bson<R: Read>(collection: std::sync::Arc<crate::collection::Collection
 fn apply_ttl(doc: &mut Document, map: &BsonDocument, ttl_field: &Option<String>) {
     if !matches!(doc.metadata.document_type, DocumentType::Ephemeral) { return; }
     let Some(key) = ttl_field.as_ref() else { return; };
-    if let Some(val) = map.get(key) {
-        if let Some(secs) = match val {
+    if let Some(val) = map.get(key)
+        && let Some(secs) = match val {
             bson::Bson::Int32(i) => Some(*i as i64),
             bson::Bson::Int64(i) => Some(*i),
             bson::Bson::Double(f) => Some(*f as i64),
             bson::Bson::String(s) => s.parse::<i64>().ok(),
             _ => None,
         } {
-            doc.set_ttl(std::time::Duration::from_secs(secs as u64));
-        }
+        doc.set_ttl(std::time::Duration::from_secs(secs as u64));
     }
 }
 
