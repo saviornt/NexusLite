@@ -93,7 +93,70 @@ To enable optional regex support in queries, build with the feature flag:
 cargo test --features regex -- --nocapture
 ```
 
+## CLI and REPL
+
+The `nexuslite` binary offers admin and query commands plus an interactive shell.
+
+Examples:
+
+```powershell
+# Info and doctor
+nexuslite info
+nexuslite doctor
+
+# Create a document (persistent)
+nexuslite create-document mycoll '{"user":"alice","age":31}'
+
+# Create an ephemeral document with TTL from STDIN
+echo '{"event":"login"}' | nexuslite create-document ignored --stdin --ephemeral --ttl 60
+
+# List and purge ephemeral
+nexuslite list-ephemeral
+nexuslite purge-ephemeral --all
+
+# Start REPL
+nexuslite shell
+# then type commands like:
+#   help
+#   list-collections
+#   find mycoll {"age":{"$gte":30}}
+#   count mycoll {"user":"alice"}
+#   update mycoll {"user":"alice"} {"$set":{"age":32}}
+#   delete mycoll {"user":"bob"}
+#   create-document mycoll {"user":"carol"} ephemeral ttl=120
+#   purge-ephemeral all
+#   config
+#   exit
+```
+
 ---
+
+## Testing matrix
+
+The following tests validate major features:
+
+- Cache (TTL/LRU/LFU, metrics, sweeper): `tests/mod_cache.rs`
+- Collections CRUD + index create/drop: `tests/mod_collection.rs`, `tests/mod_index.rs`
+- Query (filters, projection, sort, pagination): `tests/mod_query.rs`
+- Query extras: regex and timeout: `tests/mod_query_features.rs` (enable with `--features regex`)
+- Import/Export NDJSON/CSV and options: `tests/mod_import.rs`
+- Import/Export BSON roundtrip: `tests/mod_import.rs::test_import_bson_and_export_bson_roundtrip`
+- WAL append/read: `tests/mod_wal.rs`
+- WASP internals: CoW tree, segments, tiny WAL, checksum, torn-write: `tests/mod_wasp.rs`
+- Snapshot/Checkpoint with index descriptors: `tests/mod_snapshot.rs`
+- Paths, logging folders, DB/WASP files: `tests/mod_paths.rs`
+
+Run core suite:
+
+```powershell
+cargo test -- --nocapture
+```
+
+Run with regex feature enabled for regex tests:
+
+```powershell
+cargo test --features regex -- --nocapture
+```
 
 ## Database Architecture
 

@@ -519,10 +519,13 @@ fn set_path(doc: &mut BsonDocument, path: &str, val: Bson) -> bool {
         if need_new {
             cur.insert(key.clone(), Bson::Document(BsonDocument::new()));
         }
-        let child = cur.get_mut(&key).expect("inserted or existed document");
-        if let Bson::Document(d) = child { cur = d; } else { return false; }
+        if let Some(child) = cur.get_mut(&key) {
+            if let Bson::Document(d) = child { cur = d; } else { return false; }
+        } else {
+            return false;
+        }
     }
-    let last = parts.last().unwrap();
+    let last = match parts.last() { Some(l) => l, None => return false };
     let prev = cur.get(*last).cloned();
     let changed = match prev.as_ref() { Some(p) => !bson_equal(p, &val), None => true };
     cur.insert((*last).to_string(), val);
@@ -549,6 +552,6 @@ fn unset_path(doc: &mut BsonDocument, path: &str) -> bool {
         let key = parts[i];
         match cur.get_mut(key) { Some(Bson::Document(d)) => { cur = d; }, _ => return false }
     }
-    let last = parts.last().unwrap();
+    let last = match parts.last() { Some(l) => l, None => return false };
     cur.remove(*last).is_some()
 }

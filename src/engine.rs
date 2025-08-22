@@ -29,28 +29,8 @@ impl Engine {
             storage: Arc::new(RwLock::new(Box::new(wal))),
             metadata_path,
         };
-
-        // Create the hidden collection for temporary documents on startup.
-        let temp_collection = engine.create_collection("_tempDocuments".to_string());
-
-        // Load ephemeral documents from the WAL into the cache.
-        {
-            let storage = engine.storage.read();
-            let operations = storage.read_all()?;
-            for op in operations {
-                if let Ok(operation) = op {
-                    match operation {
-                        crate::types::Operation::Insert { document } => {
-                            if document.metadata.document_type == DocumentType::Ephemeral {
-                                temp_collection.cache.insert(document);
-                            }
-                        }
-                        // Handle other operations if necessary to reconstruct state
-                        _ => {}
-                    }
-                }
-            }
-        }
+    // Initialize ephemeral handling
+    engine.init_ephemeral_cache()?;
 
     // Rebuild indexes from metadata if present
     engine.load_indexes_metadata();
@@ -101,7 +81,10 @@ impl Engine {
         if map.contains_key(new) {
             return Err(crate::errors::DbError::CollectionAlreadyExists(new.to_string()));
         }
-    let col = map.remove(old).expect("checked above");
+    let col = match map.remove(old) {
+        Some(c) => c,
+        None => return Err(crate::errors::DbError::NoSuchCollection(old.to_string())),
+    };
     col.set_name(new.to_string());
     map.insert(new.to_string(), col);
         Ok(())
@@ -119,6 +102,8 @@ impl Engine {
             storage: Arc::new(RwLock::new(Box::new(wasp))),
         metadata_path,
         };
+        // Initialize ephemeral handling
+        engine.init_ephemeral_cache()?;
         // Rebuild indexes from metadata if present
         engine.load_indexes_metadata();
         Ok(engine)
@@ -126,9 +111,28 @@ impl Engine {
 }
 
 impl Engine {
+    /// Ensure the ephemeral collection exists and preload ephemeral docs from storage.
+    fn init_ephemeral_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let temp_collection = self.create_collection("_tempDocuments".to_string());
+        let storage = self.storage.read();
+        let operations = storage.read_all()?;
+        for op in operations {
+            if let Ok(operation) = op {
+                match operation {
+                    crate::types::Operation::Insert { document } => {
+                        if document.metadata.document_type == DocumentType::Ephemeral {
+                            temp_collection.cache.insert(document);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
     fn indexes_meta_path(&self) -> PathBuf { self.metadata_path.clone() }
 
-    fn load_indexes_metadata(&self) {
+    pub fn load_indexes_metadata(&self) {
         let path = self.indexes_meta_path();
         if let Ok(bytes) = fs::read(&path) {
             if let Ok(mut meta) = serde_json::from_slice::<IndexesMetadata>(&bytes) {

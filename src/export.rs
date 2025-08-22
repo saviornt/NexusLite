@@ -36,7 +36,10 @@ pub fn export_file(engine: &Engine, collection: &str, path: impl AsRef<Path>, op
 
 fn tmp_path(path: &Path, suffix: &str) -> PathBuf {
     let mut p = PathBuf::from(path);
-    let file = p.file_name().unwrap().to_string_lossy().to_string();
+    let file = p
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "export".to_string());
     p.set_file_name(format!("{}{}", file, suffix));
     p
 }

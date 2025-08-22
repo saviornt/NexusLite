@@ -36,11 +36,14 @@ impl Wal {
         let mut operations = Vec::new();
         let mut offset = 0;
 
-        while offset < buffer.len() {
+        while offset + 8 <= buffer.len() {
             let len_bytes = &buffer[offset..offset + 8];
-            let len = u64::from_be_bytes(len_bytes.try_into().unwrap());
+            let len = match <&[u8; 8]>::try_from(len_bytes) {
+                Ok(arr) => u64::from_be_bytes(*arr),
+                Err(_) => break,
+            };
             offset += 8;
-
+            if offset + len as usize > buffer.len() { break; }
             let encoded_op = &buffer[offset..offset + len as usize];
             let operation = decode_from_slice::<crate::types::Operation, _>(encoded_op, standard());
             operations.push(operation.map(|(op, _)| op));

@@ -22,6 +22,11 @@ pub enum Command {
     QueryDelete { collection: String, filter_json: String },
     QueryUpdateOne { collection: String, filter_json: String, update_json: String },
     QueryDeleteOne { collection: String, filter_json: String },
+    // Document creation
+    CreateDocument { collection: Option<String>, json: String, ephemeral: bool, ttl_secs: Option<u64> },
+    // Ephemeral admin
+    ListEphemeral,
+    PurgeEphemeral { all: bool },
 }
 
 fn parse_format_input(s: &Option<String>) -> Option<String> { s.as_ref().map(|x| x.to_lowercase()) }
@@ -151,6 +156,41 @@ pub fn run(engine: &Engine, cmd: Command) -> Result<(), Box<dyn std::error::Erro
             let filter = query::parse_filter_json(&filter_json)?;
             let r = query::delete_one(&col, &filter);
             println!("{{\"deleted\":{}}}", r.deleted);
+            Ok(())
+        }
+        Command::CreateDocument { collection, json, ephemeral, ttl_secs } => {
+            // Determine target collection
+            let target = if ephemeral { "_tempDocuments".to_string() } else { collection.ok_or("collection is required for persistent document")? };
+            let col = engine
+                .get_collection(&target)
+                .unwrap_or_else(|| engine.create_collection(target.clone()));
+            // Parse JSON into BSON document
+            let value: serde_json::Value = serde_json::from_str(&json)?;
+            let bdoc: bson::Document = bson::to_document(&value)?;
+            let mut doc = crate::document::Document::new(bdoc, if ephemeral { crate::document::DocumentType::Ephemeral } else { crate::document::DocumentType::Persistent });
+            if ephemeral {
+                if let Some(secs) = ttl_secs { doc.set_ttl(std::time::Duration::from_secs(secs)); }
+            }
+            let id = col.insert_document(doc);
+            println!("{}", id.0);
+            Ok(())
+        }
+        Command::ListEphemeral => {
+            if let Some(col) = engine.get_collection("_tempDocuments") {
+                for d in col.get_all_documents() {
+                    let line = serde_json::to_string(&d.data.0)?;
+                    println!("{}", line);
+                }
+            }
+            Ok(())
+        }
+        Command::PurgeEphemeral { all } => {
+            if let Some(col) = engine.get_collection("_tempDocuments") {
+                let docs = col.get_all_documents();
+                for d in docs {
+                    if all || d.is_expired() { let _ = col.delete_document(&d.id); }
+                }
+            }
             Ok(())
         }
     }

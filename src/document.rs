@@ -58,7 +58,10 @@ impl Document {
     pub fn is_expired(&self) -> bool {
         if let Some(ttl) = self.metadata.ttl {
             let elapsed = Utc::now().signed_duration_since(self.metadata.updated_at.0);
-            elapsed > chrono::Duration::from_std(ttl).unwrap()
+            match chrono::Duration::from_std(ttl) {
+                Ok(d) => elapsed > d,
+                Err(_) => false,
+            }
         } else {
             false
         }

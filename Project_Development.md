@@ -14,6 +14,7 @@ Future features will always build on stable, well-tested foundations.
 - Design with concurrency in mind using `RwLock` from the start.
 - Design with async in mind using `tokio` for both network and file-based async I/O.
 - Design modules with error handling and logging using the `thiserror`, `log`, and `log4rs` crates.
+- Testing & the use of `.unwrap()`, as per its documentation: Because this function may panic, its use is generally discouraged. Panics are meant for unrecoverable errors, and may abort the entire program. Instead, prefer to use the ? (try) operator, or pattern matching to handle the Err case explicitly, or call [unwrap_or], [unwrap_or_else], or [unwrap_or_default].
 
 ### Sprint 1 - Core In-Memory Engine
 
@@ -295,16 +296,18 @@ Future features will always build on stable, well-tested foundations.
   - [x] Minimal planner rule (acceptance): use a single-field index for simple equality/range predicates; otherwise full scan; tests assert planner chooses the index when available
   - [x] Index metadata versioning: bump on index format changes; auto-rebuild indexes on version mismatch at startup (document behavior)
 
-- [ ] API/CLI/UX
-  - [ ] Full clap-based binary exposing Import/Export/Query commands and DB/collection admin
-  - [ ] Add CLI config file loader with precedence (flags > env > config files > defaults) (e.g., `nexuslite.toml` and `nexusliterc`) for default DB path, logging and user preferences.
-  - [ ] Config secrets hygiene: discourage storing secrets in config files; prefer environment variables; redact secret-like keys in logs and diagnostics
-  - [ ] Implement on-disk index metadata/versioning and rebuild UX
-  - [ ] Add `nexuslite info` command to print database stats, index metadata, and engine version
-  - [ ] Add `nexuslite doctor` CLI command to check DB health, file permissions, and config
-  - [ ] Add "info" API/FFI call to print engine/cache/index stats and other metrics that should be exposed
-  - [ ] Add `nexuslite shell` for interactive query/collection management (REPL)
-  - [ ] Implement testing framework for API/CLI/UX to ensure all features are covered
+- [x] API/CLI/UX
+  - [x] Clap-based binary exposing Import/Export/Query commands and DB/collection admin (`src/bin/nexuslite.rs`)
+  - [x] CLI config file loader with precedence (flags > env > config files > defaults)
+    - [x] Config secrets hygiene: discourage storing secrets in config files; prefer environment variables; redact secret-like keys in logs and diagnostics
+    - [x] Implement on-disk index metadata/versioning and rebuild UX
+  - [x] `nexuslite info` command to print basic database stats (collections, cache metrics)
+  - [x] `nexuslite doctor` command to check basic DB/WASP file access
+    - [x] `nexuslite shell` for interactive query/collection management (REPL)
+  - [x] Implement full API/FFI calls exposing Import/Export/Query commands, DB/collection admin, and an info to print engine/cache/index stats and other metrics that should be exposed (`api.rs`)
+  - [x] Tests updated to cover CLI programmatic path; binary executes and compiles via cargo test
+
+  Notes: As part of hardening, remaining uses of `.unwrap()`/`.expect()` in runtime paths were removed or isolated behind guaranteed-safe constructs. CLI now propagates errors instead of panicking.
 
 - [ ] Cryptography (optional features)
   - [ ] ECC-256 encryption (key/Pair) and ECDSA signature verification
@@ -314,6 +317,8 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Implement support for `secret fields` (e.g., user-based passwords using `bcrypt`/`argon2`) that will salt and hash field values. These field values will not be queryable (no equality joins on hashed values)
   - [ ] PQC roadmap alignment (ml-kem, sphincs+) as future work
   - [ ] Add PQC code stub to the `crypto` module for future integration.
+  - [ ] Create tests for encryption/decryption, including if username/passwords and key/pairs or signature verification do not match.
+  - [ ] Update project documentation and README documentation.
 
 - [ ] Code security and supply-chain
   - [ ] `cargo audit` + `cargo deny` in CI; fail on vulnerable/yanked deps
@@ -353,6 +358,7 @@ Future features will always build on stable, well-tested foundations.
     - [ ] Slow query threshold (ms) configurable per-DB; log top N offenders
     - [ ] Slow query log format stability: include fields {timestamp, db, collection, filter_hash, duration_ms, limit, skip}; treat names as stable for MVP
   - [ ] Metrics naming stability: document metric names in docs and consider them stable for MVP
+  - [ ] Implement a robust logging system that can be configured (logging level, format, destination) using a configuration file, the API or the CLI. The logging system should support structured logging and allow for easy integration with external monitoring tools.
 
 - [ ] Feature flags
   - [ ] Publish supported feature flags: `crypto-ecc`, `crypto-pqc` (future), `prometheus`, `regex`, `cli-bin`
@@ -360,7 +366,7 @@ Future features will always build on stable, well-tested foundations.
   - [ ] Expose compiled feature flags in `db info` and document them in mdBook/Rustdoc
 
 - [ ] Docs
-  - [ ] Add a "Deployment" section with guidelines for deploying the application.
+  - [ ] Add a "Deployment" section with guidelines for deploying the database.
   - [ ] Add a "Security Model" section to the documentation, outlining threat model, encryption and audit logging plans
   - [ ] Add a "Performance Tuning" section with cache, eviction, and index tuning tips.
   - [ ] Add a "Testing and QA" section with guidelines for writing tests and using CI tools.
@@ -407,6 +413,7 @@ Future features will always build on stable, well-tested foundations.
 
 ## Future Enhancements and Optional Features
 
+- Add stricter redaction for secrets detection using the key matcher list and pattern-based value masking across outputs.
 - Add support for PQC encryption/decryption and signature verification of the database.
   - Use `pqcrypto-mlkem` for key encapsulation (`ml-kem-512`, `ml-kem-768`, `ml-kem-1024`).
   - Use `pqcrypto-sphincsplus` for signature verification (`128`, `192`, `256`-bit hash functions).

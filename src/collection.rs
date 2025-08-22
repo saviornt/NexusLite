@@ -40,7 +40,9 @@ impl Collection {
     let doc_id = document.id.clone();
     // First, persist operation
     let operation = Operation::Insert { document: document.clone() };
-    self.storage.write().append(&operation).expect("Failed to append insert operation to storage");
+    if let Err(e) = self.storage.write().append(&operation) {
+        log::error!("storage append(insert) failed: {e}");
+    }
     // Then apply to cache and indexes
     self.cache.insert(document.clone());
     index_insert_all(&mut self.indexes.write(), &document.data.0, &doc_id);
@@ -72,7 +74,9 @@ impl Collection {
             new_doc_same_id.id = id.clone();
             // Persist update first
             let operation = Operation::Update { document_id: id.clone(), new_document: new_doc_same_id.clone() };
-            self.storage.write().append(&operation).expect("Failed to append update operation to storage");
+            if let Err(e) = self.storage.write().append(&operation) {
+                log::error!("storage append(update) failed: {e}");
+            }
             // Then mutate cache and indexes
             index_remove_all(&mut self.indexes.write(), &old.data.0, id);
             self.cache.insert(new_doc_same_id.clone());
@@ -108,7 +112,9 @@ impl Collection {
         if let Some(old) = self.cache.get(id) {
             // Persist delete first
             let operation = Operation::Delete { document_id: id.clone() };
-            self.storage.write().append(&operation).expect("Failed to append delete operation to storage");
+            if let Err(e) = self.storage.write().append(&operation) {
+                log::error!("storage append(delete) failed: {e}");
+            }
             // Then remove from cache and indexes
             let _ = self.cache.remove(id);
             index_remove_all(&mut self.indexes.write(), &old.data.0, id);

@@ -49,8 +49,6 @@ async fn test_ttl_eviction() {
     assert!(cache.get(&doc.id).is_none());
 }
 
-// ---- merged from mod_cache_sprint2.rs ----
-
 #[tokio::test]
 async fn ttl_first_over_lru_when_full() {
     let cfg = CacheConfig { capacity: 2, batch_size: 10, ..Default::default() };
@@ -155,8 +153,6 @@ async fn purge_trigger_and_interval_tuning() {
     let evicted = cache.purge_expired_now();
     assert!(evicted >= 1);
 }
-
-// ---- merged from mod_cache_sprint3.rs ----
 
 #[tokio::test]
 async fn lfu_vs_lru_victim_selection_differs() {

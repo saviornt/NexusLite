@@ -108,7 +108,7 @@ impl Cache {
     /// Creates a new cache with the provided configuration.
     pub fn new_with_config(config: CacheConfig) -> Self {
         let cache = Cache {
-            store: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(config.capacity).unwrap()))),
+            store: Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(config.capacity.max(1)).unwrap_or_else(|| NonZeroUsize::new(1).expect("NonZeroUsize(1) must exist"))))),
             config: Arc::new(RwLock::new(config)),
             metrics: Arc::new(CacheMetrics::default()),
             eviction_lock: Arc::new(Mutex::new(())),
@@ -240,7 +240,7 @@ impl Cache {
     }
 
     pub fn set_capacity(&self, capacity: usize) {
-        let nz = NonZeroUsize::new(capacity.max(1)).unwrap();
+    let nz = NonZeroUsize::new(capacity.max(1)).unwrap_or_else(|| NonZeroUsize::new(1).expect("NonZeroUsize(1) must exist"));
         self.config.write().capacity = nz.get();
         self.store.write().resize(nz);
     }
