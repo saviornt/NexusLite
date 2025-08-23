@@ -97,7 +97,13 @@ fn test_import_bson_and_export_bson_roundtrip() {
     let mut f = std::fs::File::open(&out).unwrap();
     let mut buf = Vec::new(); f.read_to_end(&mut buf).unwrap();
     let mut off = 0usize; let mut cnt = 0;
-    while off + 4 <= buf.len() { let sz = i32::from_le_bytes(buf[off..off+4].try_into().unwrap()) as usize; if off+sz > buf.len() { break; } off += sz; cnt += 1; }
+    while off + 4 <= buf.len() {
+        let raw = i32::from_le_bytes(buf[off..off+4].try_into().unwrap());
+        if raw < 0 { break; }
+        let sz = usize::try_from(raw).unwrap();
+        if off + sz > buf.len() { break; }
+        off += sz; cnt += 1;
+    }
     assert_eq!(cnt, 2);
 }
 

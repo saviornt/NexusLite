@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 use clap::{Parser, Subcommand};
 use nexus_lite::{engine::Engine, cli as prog_cli};
 use std::path::PathBuf;
@@ -15,13 +16,13 @@ struct AppConfig {
     sig_policy: Option<String>,
 }
 
-fn load_config(cli_cfg: Option<PathBuf>) -> AppConfig {
+fn load_config(cli_cfg: Option<&PathBuf>) -> AppConfig {
     // Precedence: CLI > env > config files > defaults
     // 1) Start with defaults
     let mut cfg = AppConfig::default();
     // 2) Load from config files (~/.config/nexuslite.toml, ./.nexusliterc, custom path)
     let mut paths: Vec<PathBuf> = vec![];
-    if let Some(p) = &cli_cfg { paths.push(p.clone()); }
+    if let Some(p) = cli_cfg { paths.push(p.clone()); }
     if let Ok(p) = std::env::var("NEXUSLITE_CONFIG") { paths.push(PathBuf::from(p)); }
     if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
         let home_pb = PathBuf::from(home);
@@ -52,7 +53,7 @@ fn load_config(cli_cfg: Option<PathBuf>) -> AppConfig {
     cfg
 }
 
-fn find_config_paths(cli_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
+fn find_config_paths(cli_cfg: Option<&PathBuf>) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = vec![];
     if let Some(p) = cli_cfg { paths.push(p.clone()); }
     if let Ok(p) = std::env::var("NEXUSLITE_CONFIG") { paths.push(PathBuf::from(p)); }
@@ -415,7 +416,7 @@ fn ensure_engine(db_override: Option<&PathBuf>, cfg: &AppConfig) -> Result<Engin
 
 fn main() {
     let cli = Cli::parse();
-    let cfg = load_config(cli.config.clone());
+    let cfg = load_config(cli.config.as_ref());
     let engine = match ensure_engine(cli.db.as_ref(), &cfg) {
         Ok(e) => e,
         Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
@@ -587,7 +588,7 @@ fn main() {
                 println!("no_db_specified");
             }
             // Config hygiene: scan config files for secret-like keys and prefer env vars
-            let paths = find_config_paths(&cli.config);
+            let paths = find_config_paths(cli.config.as_ref());
             println!("config_scanned:{}", paths.len());
             for p in paths {
                 if p.exists() {

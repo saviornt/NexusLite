@@ -6,10 +6,10 @@ proptest! {
         .. proptest::test_runner::Config::default()
     })]
     #[test]
-    fn prop_csv_infer_basic_ints(a in -100000i64..100000, b in -100000i64..100000) {
+    fn prop_csv_infer_basic_ints(a in -100_000_i64..100_000, b in -100_000_i64..100_000) {
         use nexus_lite::engine::Engine;
         use std::io::Cursor;
-        let csv = format!("x\n{}\n{}\n", a, b);
+    let csv = format!("x\n{a}\n{b}\n");
         let engine = Engine::new(std::env::temp_dir().join("prop_import_wal.log")).unwrap();
         let mut opts = nexus_lite::import::ImportOptions::default();
         opts.csv.has_headers = true;

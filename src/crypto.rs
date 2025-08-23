@@ -169,6 +169,10 @@ pub fn pbe_encrypt_file(username: &str, password: &str, input: &std::path::Path,
 }
 
 /// Decrypt a file using username+password (PBE). Validates username hash and version.
+/// Decrypt a PBE-encrypted file.
+///
+/// # Errors
+/// Returns I/O errors on read failures or decryption/authentication failures.
 pub fn pbe_decrypt_file(username: &str, password: &str, input: &std::path::Path, output: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
 	let mut f = fs::File::open(input)?;
 	let mut magic = [0u8;4]; f.read_exact(&mut magic)?; if &magic != PBE_MAGIC { return Err("bad pbe magic".into()); }
@@ -191,6 +195,7 @@ pub fn pbe_decrypt_file(username: &str, password: &str, input: &std::path::Path,
 }
 
 /// Quick probe to detect if a file is PBE-encrypted by checking the magic.
+#[must_use]
 pub fn pbe_is_encrypted(input: &std::path::Path) -> bool {
 	if let Ok(mut f) = fs::File::open(input) {
 		let mut magic = [0u8;4];
@@ -202,6 +207,9 @@ pub fn pbe_is_encrypted(input: &std::path::Path) -> bool {
 /// PQC stubs for future work (ML-KEM, SPHINCS+)
 pub mod pqc {
 	/// Placeholder for ML-KEM key exchange
+	///
+	/// # Errors
+	/// Always returns `FeatureNotImplemented` until PQC is implemented.
 	pub fn kem_derive_shared_secret() -> Result<(), crate::errors::DbError> {
 		// Runtime feature flag gate: crypto-pqc is stubbed and must error if used.
 		if crate::feature_flags::is_enabled("crypto-pqc") {
@@ -210,6 +218,10 @@ pub mod pqc {
 		Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()))
 	}
 	/// Placeholder for SPHINCS+ signature verify
+	/// Verify a SPHINCS+ signature.
+	///
+	/// # Errors
+	/// Always returns `FeatureNotImplemented` until PQC is implemented.
 	pub fn sphincs_verify(_msg: &[u8], _sig: &[u8]) -> Result<bool, crate::errors::DbError> {
 		if crate::feature_flags::is_enabled("crypto-pqc") {
 			return Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()));

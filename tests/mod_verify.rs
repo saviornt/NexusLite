@@ -12,7 +12,7 @@ fn test_verify_db_signatures_flow() {
     // Create a DB and write some content to .db
     let db_path = dir.path().join("v.db");
     let db = nexus_lite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
-    db.create_collection("c1");
+    let _ = db.create_collection("c1");
 
     // Generate keys via API
     let (priv_pem, pub_pem) = nexus_lite::api::crypto_generate_p256();

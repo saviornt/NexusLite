@@ -140,16 +140,19 @@ impl Database {
     // open_with_name removed: callers should pass the desired path; name derives from file stem.
 
     /// Creates a new collection with the given name.
+    #[must_use]
     pub fn create_collection(&self, name: &str) -> Arc<Collection> {
         self.engine.create_collection(name.to_string())
     }
 
     /// Retrieves a collection by its name.
+    #[must_use]
     pub fn get_collection(&self, name: &str) -> Option<Arc<Collection>> {
         self.engine.get_collection(name)
     }
 
     /// Deletes a collection by its name.
+    #[must_use]
     pub fn delete_collection(&self, name: &str) -> bool {
         self.engine.delete_collection(name)
     }
@@ -182,11 +185,14 @@ impl Database {
     }
 
     /// Lists the names of all collections.
+    #[must_use]
     pub fn list_collection_names(&self) -> Vec<String> {
         self.engine.list_collection_names()
     }
 
     /// Rename a collection.
+    /// # Errors
+    /// Returns an error if the rename operation fails at the engine layer.
     pub fn rename_collection(&self, old: &str, new: &str) -> Result<(), DbError> {
         self.engine.rename_collection(old, new)
     }
@@ -245,7 +251,7 @@ impl Database {
     #[must_use]
     pub fn name(&self) -> &str { &self.name }
 
-    /// Closes an open database handle by path (optional). If not found, returns DatabaseNotFound.
+    /// Closes an open database handle by path (optional). If not found, returns `DatabaseNotFound`.
     /// This removes the handle from the internal registry; resources are dropped when no longer referenced.
     /// # Errors
     /// Returns an error if the database handle cannot be found.

@@ -64,7 +64,7 @@ pub fn db_close(db_path: Option<&str>) -> Result<(), DbError> {
 }
 
 pub fn db_create_collection(db: &crate::Database, name: &str) {
-    db.create_collection(name);
+    let _ = db.create_collection(name);
 }
 
 pub fn db_list_collections(db: &crate::Database) -> Vec<String> {

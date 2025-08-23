@@ -18,6 +18,6 @@ fn api_telemetry_config_and_rate_limit() {
     let e = api::count(&engine, &col.name_str(), &filter).unwrap_err();
     match e {
         nexus_lite::errors::DbError::RateLimited | nexus_lite::errors::DbError::RateLimitedWithRetry { .. } => {}
-        other => panic!("unexpected error: {:?}", other),
+        other => panic!("unexpected error: {other:?}"),
     }
 }

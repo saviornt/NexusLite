@@ -23,6 +23,6 @@ fn pqc_calls_error_as_not_implemented() {
     let err2 = nexus_lite::crypto::pqc::sphincs_verify(b"m", b"s").unwrap_err();
     match err2 {
         nexus_lite::errors::DbError::FeatureNotImplemented(name) => assert_eq!(name, "crypto-pqc"),
-        other => panic!("unexpected error: {:?}", other),
+        other => panic!("unexpected error: {other:?}"),
     }
 }

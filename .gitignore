@@ -1,19 +1,60 @@
 .gitignore
-/target
+
+# Rust build artifacts
+/target/
+**/*.rlib
+**/*.rmeta
+
+# Cargo local stuff
+/.cargo/
+
+# Large binaries and examples
+*.bin
+Bincode_V2_Example.md
+
+# Project scaffolding not needed in repo root tracking
 ProjectStructure.md
 generate_project_structure.py
 coding_prompts.txt
-*.bin
- 
+
 # Mutation testing outputs
 /mutants.out/
 /mutants.out.old/
 
+# Fuzzing artifacts
+fuzz/target/
+fuzz/corpus/**/.cache/
+
 # Logs
 *.log
 **/visible_test_logs/
+*_logs/
+*_log/
+
+# Benchmarks results
+benchmarks/results/
 
 # OS/editor files
 .DS_Store
 Thumbs.db
 *.swp
+
+# IDE/editor configs
+.vscode/
+.idea/
+*.iml
+
+# Generated DB/checkpoint files
+*.nexuslite
+*.wasp
+
+# Security/test keys
+*.pem
+*.key
+
+# Windows artifacts
+*.pdb
+*.exe
+
+# Node tool artifacts (if any)
+node_modules/

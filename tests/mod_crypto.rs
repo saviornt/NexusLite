@@ -57,7 +57,7 @@ fn cli_encrypted_checkpoint_roundtrip() {
     let db_path = dir.path().join("mydb.db");
     // Create/open DB via API
     let db = nexus_lite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
-    db.create_collection("users");
+    let _ = db.create_collection("users");
     drop(db);
     let engine = Engine::new(dir.path().join("wal.log")).unwrap();
     // Keygen and checkpoint-encrypted

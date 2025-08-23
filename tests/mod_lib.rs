@@ -14,7 +14,7 @@ async fn test_database_operations() {
 
     // 2. Create a collection
     let collection_name = "users";
-    db.create_collection(collection_name);
+    let _ = db.create_collection(collection_name);
 
     // 3. Insert a document
     let document = Document::new(doc! { "name": "Alice", "age": 30 }, DocumentType::Persistent);

@@ -47,7 +47,7 @@ fn find_sort_project_paginate() {
     use tempfile::tempdir;
     let dir = tempdir().unwrap();
     let db_name = "qtestdb";
-    let wal_path = dir.path().join(format!("{}_wasp_query.bin", db_name));
+    let wal_path = dir.path().join(format!("{db_name}_wasp_query.bin"));
     let engine = Engine::new(wal_path).unwrap();
     let col = engine.create_collection("qtest".into());
     col.insert_document(Document::new(doc!{"age": 30, "name": "alice"}, DocumentType::Persistent));

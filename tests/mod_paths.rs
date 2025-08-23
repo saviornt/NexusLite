@@ -21,7 +21,7 @@ fn open_with_custom_filename_and_extension_creates_matching_wasp() {
     assert!(wasp_path.exists());
 
     // Basic op to ensure WASP path actually used
-    db.create_collection("t");
+    let _ = db.create_collection("t");
     let _ = db.insert_document("t", Document::new(doc!{"k": 1}, DocumentType::Persistent)).unwrap();
 }
 
@@ -32,7 +32,7 @@ fn open_missing_returns_database_not_found() {
     match Database::open(db_path.to_str().unwrap()) {
         Ok(_) => panic!("expected DatabaseNotFound error"),
         Err(DbError::DatabaseNotFound) => {},
-        Err(other) => panic!("expected DatabaseNotFound, got {:?}", other),
+    Err(other) => panic!("expected DatabaseNotFound, got {other:?}"),
     }
 }
 
@@ -47,8 +47,8 @@ fn close_behaves_as_expected() {
     // Second close should error
     let err = Database::close(db_path.to_str()).unwrap_err();
     match err { 
-        DbError::DatabaseNotFound => {}, 
-        other => panic!("expected DatabaseNotFound, got {:?}", other) 
+    DbError::DatabaseNotFound => {}, 
+    other => panic!("expected DatabaseNotFound, got {other:?}") 
     }
     // Open should succeed (files exist)
     let _db2 = Database::open(db_path.to_str().unwrap()).unwrap();

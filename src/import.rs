@@ -71,8 +71,8 @@ pub struct ImportReport {
 
 /// Import data from a file path into the target collection.
 ///
-/// Errors
-/// Returns I/O errors on read failures, parse errors (wrapped as InvalidData),
+/// # Errors
+/// Returns I/O errors on read failures, parse errors (wrapped as `InvalidData`),
 /// and writer errors for sidecar files when enabled.
 pub fn import_file<P: AsRef<Path>>(engine: &Engine, path: P, opts: &ImportOptions) -> io::Result<ImportReport> {
     log::info!("import: path={}, collection={}", path.as_ref().display(), opts.collection);
@@ -114,8 +114,8 @@ fn detect_format<R: BufRead>(reader: &mut R, path: &Path) -> io::Result<ImportFo
 
 /// Import data from an arbitrary reader.
 ///
-/// Errors
-/// Returns I/O errors on read failures and parse errors (InvalidData).
+/// # Errors
+/// Returns I/O errors on read failures and parse errors (`InvalidData`).
 pub fn import_from_reader<R: Read>(engine: &Engine, reader: R, format: ImportFormat, opts: &ImportOptions) -> io::Result<ImportReport> {
     let collection = engine
         .get_collection(&opts.collection)

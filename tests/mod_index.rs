@@ -194,11 +194,10 @@ fn test_index_metadata_persistence_and_rebuild() { with_env_lock(|| {
     // Second run: new engine should rebuild index automatically
     let engine2 = Engine::new(dir.path().join("wal_meta.bin")).unwrap();
     let col2 = engine2.get_collection("meta_col").unwrap();
-    let mgr = col2.indexes.read();
-    let descs = mgr.descriptors();
+    let descs = col2.indexes.read().descriptors();
     assert_eq!(descs.len(), 1);
     assert_eq!(descs[0].field, "k");
-}) }
+}); }
 
 #[test]
 fn test_index_rebuild_ux_explicit_load() { with_env_lock(|| {
@@ -221,7 +220,7 @@ fn test_index_rebuild_ux_explicit_load() { with_env_lock(|| {
     let descs = col2.indexes.read().descriptors();
     assert_eq!(descs.len(), 1);
     assert_eq!(descs[0].field, "k");
-}) }
+}); }
 
 #[test]
 fn test_index_metadata_version_bump() { with_env_lock(|| {
@@ -242,8 +241,8 @@ fn test_index_metadata_version_bump() { with_env_lock(|| {
     assert_eq!(descs.len(), 1);
     // File should now have current version
     let updated: serde_json::Value = serde_json::from_slice(&fs::read(&meta_path).unwrap()).unwrap();
-    assert_eq!(updated["version"].as_u64().unwrap() as u32, nexus_lite::index::INDEX_METADATA_VERSION);
-}) }
+    assert_eq!(u32::try_from(updated["version"].as_u64().unwrap()).unwrap(), nexus_lite::index::INDEX_METADATA_VERSION);
+}); }
 
 #[test]
 fn test_index_build_mode_blocks_writes() {
@@ -287,7 +286,7 @@ fn test_index_wasp_overlay_compensates_index_miss() { with_env_lock(|| {
     let docs = cur.to_vec();
     assert_eq!(docs.len(), 1, "overlay should compensate for base index miss");
     assert_eq!(docs[0].id, id);
-}) }
+}); }
 
 #[test]
 fn test_index_wasp_overlay_persists_across_restart() { with_env_lock(|| {
@@ -311,7 +310,7 @@ fn test_index_wasp_overlay_persists_across_restart() { with_env_lock(|| {
     let deltas = col2.index_deltas();
     assert!(deltas.iter().any(|d| d.collection == col_name && d.field == "k" && matches!(d.op, nexus_lite::wasp::DeltaOp::Add) && d.id == id),
         "expected Add delta for id to persist across restart");
-}) }
+}); }
 
 #[test]
 fn test_index_wasp_overlay_across_restart_compensates_index_miss() { with_env_lock(|| {
@@ -342,4 +341,4 @@ fn test_index_wasp_overlay_across_restart_compensates_index_miss() { with_env_lo
     let docs = cur.to_vec();
     assert_eq!(docs.len(), 1, "overlay should still guide query after restart");
     assert_eq!(docs[0].id, id);
-}) }
+}); }

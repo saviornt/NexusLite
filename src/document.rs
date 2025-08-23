@@ -53,15 +53,16 @@ impl Document {
         }
     }
 
+    #[must_use]
     pub const fn get_ttl(&self) -> Option<Duration> {
         self.metadata.ttl
     }
 
     #[must_use]
     pub fn is_expired(&self) -> bool {
-        self.metadata.ttl.map_or(false, |ttl| {
+        self.metadata.ttl.is_some_and(|ttl| {
             let elapsed = Utc::now().signed_duration_since(self.metadata.updated_at.0);
-            chrono::Duration::from_std(ttl).map_or(false, |d| elapsed > d)
+            chrono::Duration::from_std(ttl).is_ok_and(|d| elapsed > d)
         })
     }
 

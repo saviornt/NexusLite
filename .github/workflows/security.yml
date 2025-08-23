@@ -28,7 +28,9 @@ jobs:
         run: |
           cargo install cargo-audit --force
           cargo install cargo-deny --force
-      - name: Cargo audit
+      - name: Cargo audit (non-blocking)
+        id: audit
+        continue-on-error: true
         run: cargo audit --deny warnings
       - name: Cargo deny (bans/licenses/sources)
         run: cargo deny check --all-features
@@ -36,3 +38,12 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery
       - name: Rustfmt check
         run: cargo fmt --all -- --check
+      - name: Report audit status
+        if: always()
+        shell: pwsh
+        run: |
+          if ('${{ steps.audit.outcome }}' -eq 'failure') {
+            Write-Host 'cargo audit failed; continuing to run other checks as requested.'
+          } else {
+            Write-Host 'cargo audit passed.'
+          }

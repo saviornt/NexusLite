@@ -69,8 +69,8 @@ async fn test_concurrent_exports_spawn_blocking() {
     let wal_path = dir.path().join("wal.log");
     let engine = Arc::new(Engine::new(wal_path).unwrap());
     let col = engine.create_collection("users".into());
-    for i in 0..200 {
-        col.insert_document(Document::new(doc!{"i": i as i64, "name":"n"}, DocumentType::Persistent));
+    for i in 0..200i32 {
+        col.insert_document(Document::new(doc!{"i": i64::from(i), "name":"n"}, DocumentType::Persistent));
     }
 
     let out1 = dir.path().join("a.jsonl");

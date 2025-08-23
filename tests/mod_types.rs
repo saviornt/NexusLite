@@ -14,7 +14,7 @@ fn test_document_id_creation() {
 #[test]
 fn test_serializable_bson_document_serde() {
     let bson_doc = doc! { "key": "value" };
-    let serializable_doc = SerializableBsonDocument(bson_doc.clone());
+    let serializable_doc = SerializableBsonDocument(bson_doc);
 
     let encoded = encode_to_vec(&serializable_doc, standard()).unwrap();
     let (decoded, _): (SerializableBsonDocument, usize) = bincode::serde::decode_from_slice(&encoded, standard()).unwrap();

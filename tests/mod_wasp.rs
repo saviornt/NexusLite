@@ -6,6 +6,21 @@ use tempfile::tempdir;
 use bson::doc;
 use std::io::Write as _;
 
+#[cfg(target_os = "windows")]
+use std::ffi::OsStr;
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(target_os = "windows")]
+use std::ptr::null_mut;
+#[cfg(target_os = "windows")]
+use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
+#[cfg(target_os = "windows")]
+use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+#[cfg(target_os = "windows")]
+use winapi::um::winnt::{FILE_SHARE_READ, GENERIC_READ};
+#[cfg(target_os = "windows")]
+use std::os::windows::io::FromRawHandle;
+
 #[test]
 fn test_wasp_insert_and_get() {
     let dir = tempdir().unwrap();
@@ -80,7 +95,7 @@ fn test_wasp_checkpoint() {
     // Assert temp file exists before checkpoint
     let tmp_path = db_path.with_extension("db.tmp");
     // The temp file should not exist yet
-    assert!(!tmp_path.exists(), "Temp file already exists before checkpoint: {:?}", tmp_path);
+    assert!(!tmp_path.exists(), "Temp file already exists before checkpoint: {tmp_path:?}");
 
     // On Windows, give the OS a moment to release the lock
     #[cfg(target_os = "windows")]
@@ -90,7 +105,7 @@ fn test_wasp_checkpoint() {
     #[cfg(target_os = "windows")]
     {
         match wasp.checkpoint(&db_path) {
-            Ok(_) => {}
+            Ok(()) => {}
             Err(e) => {
                 // Windows can briefly hold exclusive locks resulting in AccessDenied.
                 // Treat this as a soft failure and skip the remainder of the test.
@@ -105,32 +120,17 @@ fn test_wasp_checkpoint() {
     }
 
     // Assert destination file exists after checkpoint
-    assert!(db_path.exists(), "Destination file does not exist after checkpoint: {:?}", db_path);
+    assert!(db_path.exists(), "Destination file does not exist after checkpoint: {db_path:?}");
 
     // On Windows, give the OS a moment to release the lock after move
     #[cfg(target_os = "windows")]
     std::thread::sleep(std::time::Duration::from_millis(200));
-    #[cfg(target_os = "windows")]
-    use std::ptr::null_mut;
-    #[cfg(target_os = "windows")]
-    use winapi::um::fileapi::CreateFileW;
-    #[cfg(target_os = "windows")]
-    use winapi::um::winnt::{FILE_SHARE_READ, GENERIC_READ};
-    #[cfg(target_os = "windows")]
-    use winapi::um::fileapi::OPEN_EXISTING;
-    #[cfg(target_os = "windows")]
-    use winapi::um::handleapi::INVALID_HANDLE_VALUE;
-    #[cfg(target_os = "windows")]
-    use std::ffi::OsStr;
-    #[cfg(target_os = "windows")]
-    use std::os::windows::ffi::OsStrExt;
     #[cfg(target_os = "windows")]
     fn open_with_shared_read(path: &std::path::Path) -> Option<std::fs::File> {
         let wide: Vec<u16> = OsStr::new(path)
             .encode_wide()
             .chain(Some(0))
             .collect();
-        use std::os::windows::io::FromRawHandle;
         unsafe {
             let handle = CreateFileW(
                 wide.as_ptr(),
@@ -144,14 +144,16 @@ fn test_wasp_checkpoint() {
             if handle == INVALID_HANDLE_VALUE {
                 None
             } else {
-                Some(std::fs::File::from_raw_handle(handle as *mut _))
+                // SAFETY: Converting winapi HANDLE to std RawHandle for test-only shared read open
+                let raw: std::os::windows::io::RawHandle = std::mem::transmute_copy(&handle);
+                Some(std::fs::File::from_raw_handle(raw))
             }
         }
     }
     #[cfg(target_os = "windows")]
-    let mut file = match open_with_shared_read(&db_path) {
-        Some(f) => f,
-        None => { eprintln!("Skipping test_wasp_checkpoint: cannot open checkpoint file with shared read"); return; }
+    let Some(mut file) = open_with_shared_read(&db_path) else {
+        eprintln!("Skipping test_wasp_checkpoint: cannot open checkpoint file with shared read");
+        return;
     };
     #[cfg(not(target_os = "windows"))]
     let mut file = std::fs::File::open(&db_path).unwrap();

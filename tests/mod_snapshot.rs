@@ -4,6 +4,21 @@ use bson::doc;
 use tempfile::tempdir;
 // Decoding uses library helper to support magic/version wrapper
 
+#[cfg(target_os = "windows")]
+use std::ffi::OsStr;
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(target_os = "windows")]
+use std::ptr::null_mut;
+#[cfg(target_os = "windows")]
+use winapi::um::fileapi::{CreateFileW, OPEN_EXISTING};
+#[cfg(target_os = "windows")]
+use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+#[cfg(target_os = "windows")]
+use winapi::um::winnt::{FILE_SHARE_READ, GENERIC_READ};
+#[cfg(target_os = "windows")]
+use std::os::windows::io::FromRawHandle;
+
 #[test]
 fn snapshot_contains_index_descriptors() {
     let dir = tempdir().unwrap();
@@ -44,20 +59,12 @@ fn snapshot_contains_index_descriptors() {
     // Read back and decode snapshot
     #[cfg(target_os = "windows")]
     {
-        use std::ptr::null_mut;
-        use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
-        use winapi::um::fileapi::CreateFileW;
-        use winapi::um::winnt::{FILE_SHARE_READ, GENERIC_READ};
-        use winapi::um::fileapi::OPEN_EXISTING;
-        use winapi::um::handleapi::INVALID_HANDLE_VALUE;
         use std::io::Read as _;
         fn open_with_shared_read(path: &std::path::Path) -> Option<std::fs::File> {
             let wide: Vec<u16> = OsStr::new(path)
                 .encode_wide()
                 .chain(Some(0))
                 .collect();
-            use std::os::windows::io::FromRawHandle;
             unsafe {
                 let handle = CreateFileW(
                     wide.as_ptr(),
@@ -71,17 +78,18 @@ fn snapshot_contains_index_descriptors() {
                 if handle == INVALID_HANDLE_VALUE {
                     None
                 } else {
-                    Some(std::fs::File::from_raw_handle(handle as *mut _))
+                    let raw: std::os::windows::io::RawHandle = std::mem::transmute_copy(&handle);
+                    Some(std::fs::File::from_raw_handle(raw))
                 }
             }
         }
-        let mut f = match open_with_shared_read(&snap_out) {
-            Some(f) => f,
-            None => { eprintln!("Skipping snapshot_contains_index_descriptors: cannot open snapshot with shared read"); return; }
+        let Some(mut f) = open_with_shared_read(&snap_out) else {
+            eprintln!("Skipping snapshot_contains_index_descriptors: cannot open snapshot with shared read");
+            return;
         };
-    let mut bytes = Vec::new();
-    f.read_to_end(&mut bytes).unwrap();
-    let snap = nexus_lite::wasp::decode_snapshot_from_bytes(&bytes).unwrap();
+        let mut bytes = Vec::new();
+        f.read_to_end(&mut bytes).unwrap();
+        let snap = nexus_lite::wasp::decode_snapshot_from_bytes(&bytes).unwrap();
         let users = snap.indexes.get("users").expect("users indexes present");
         assert!(users.iter().any(|d| d.field == "age" && matches!(d.kind, IndexKind::BTree)));
         assert!(users.iter().any(|d| d.field == "name" && matches!(d.kind, IndexKind::Hash)));

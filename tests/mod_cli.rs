@@ -56,15 +56,15 @@ async fn test_cli_telemetry_rate_limit() {
     // Second count should be rate-limited
     let err = run(&engine, Command::QueryCount { collection: col.name_str(), filter_json: filter });
     match err {
-        Ok(_) => panic!("expected rate limited error"),
+        Ok(()) => panic!("expected rate limited error"),
         Err(e) => {
             if let Some(db) = e.downcast_ref::<DbError>() {
                 match db {
                     DbError::RateLimited | DbError::RateLimitedWithRetry { .. } => {},
-                    _ => panic!("unexpected db error: {}", db),
+                    _ => panic!("unexpected db error: {db}"),
                 }
             } else {
-                panic!("unexpected error type: {}", e);
+                panic!("unexpected error type: {e}");
             }
         }
     }

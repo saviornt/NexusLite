@@ -15,8 +15,9 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
+	#[must_use]
 	pub fn new(size: usize, k: u8) -> Self {
-		BloomFilter { bits: vec![0; size], k }
+		Self { bits: vec![0; size], k }
 	}
 	fn hash(&self, key: &[u8], i: u8) -> usize {
 	use std::hash::Hasher;
@@ -32,6 +33,7 @@ impl BloomFilter {
 			self.bits[idx] = 1;
 		}
 	}
+	#[must_use]
 	pub fn contains(&self, key: &[u8]) -> bool {
 		for i in 0..self.k {
 			let idx = self.hash(key, i);
@@ -56,7 +58,7 @@ use crate::index::IndexKind as IxKind;
 
 // Minimal block cache handle; extend to store decoded pages if needed.
 pub struct BlockCache {}
-impl BlockCache { pub fn new() -> Self { BlockCache {} } }
+impl BlockCache { #[must_use] pub const fn new() -> Self { Self {} } }
 impl Default for BlockCache { fn default() -> Self { Self::new() } }
 
 
@@ -78,7 +80,7 @@ pub fn prefetch_pages(ids: &[u64], file: &mut File, cache: &Arc<RwLock<BlockCach
 
 
 /// Hook to batch manifest updates per flip; currently immediate for durability.
-pub fn optimize_manifest_updates() {
+pub const fn optimize_manifest_updates() {
 	// In a real system, this would batch manifest updates in memory and flush them together.
 	// For now, manifest updates are written immediately for durability.
 }
@@ -86,7 +88,8 @@ pub fn optimize_manifest_updates() {
 /// WASP metrics reporting hook (lightweight placeholder).
 pub struct WasMetrics {}
 impl WasMetrics {
-	pub fn new() -> Self { WasMetrics {} }
+	#[must_use]
+	pub const fn new() -> Self { Self {} }
 	/// Collects and prints WASP engine metrics (placeholder for now).
 	pub fn report(&self) {
 		// In a real system, gather stats from cache, storage, and engine.
@@ -104,6 +107,7 @@ pub fn run_benchmarks() {
 
 // Durability & integrity helpers
 
+#[must_use]
 pub fn verify_page_checksum(page: &Page) -> bool {
 	page.verify_crc()
 }
@@ -144,7 +148,8 @@ pub struct ConsistencyReport {
 
 pub struct ConsistencyChecker {}
 impl ConsistencyChecker {
-	pub fn new() -> Self { ConsistencyChecker {} }
+	#[must_use]
+	pub const fn new() -> Self { Self {} }
 	/// Detailed check of both manifest slots with diagnostics.
 	pub fn check_detailed(&self, file: &mut File) -> ConsistencyReport {
 		let offsets = [0u64, WASP_PAGE_SIZE as u64];
@@ -246,21 +251,21 @@ pub struct SnapshotTracker {
 	pub current_epoch: u64,
 }
 impl SnapshotTracker {
-	pub fn new() -> Self { SnapshotTracker { current_epoch: 0 } }
+	pub const fn new() -> Self { Self { current_epoch: 0 } }
 	pub fn advance(&mut self) { self.current_epoch += 1; }
 }
 impl Default for SnapshotTracker { fn default() -> Self { Self::new() } }
 
 pub struct MvccEngine {}
 impl MvccEngine {
-	pub fn new() -> Self { MvccEngine {} }
+	pub const fn new() -> Self { Self {} }
 	pub fn visible(&self, _epoch: u64, _txn_epoch: u64) -> bool { true }
 }
 impl Default for MvccEngine { fn default() -> Self { Self::new() } }
 
 pub struct CompactionEngine {}
 impl CompactionEngine {
-	pub fn new() -> Self { CompactionEngine {} }
+	pub const fn new() -> Self { Self {} }
 	pub fn run_background(&self) {
 		std::thread::spawn(|| {
 			use std::time::Duration;
@@ -276,14 +281,17 @@ impl Default for CompactionEngine { fn default() -> Self { Self::new() } }
 
 pub struct FreeSpaceMap {}
 impl FreeSpaceMap {
-	pub fn new() -> Self { FreeSpaceMap {} }
+	pub const fn new() -> Self { Self {} }
+	#[allow(clippy::missing_const_for_fn)]
 	pub fn recycle(&mut self, _page_id: u64) {}
 }
 impl Default for FreeSpaceMap { fn default() -> Self { Self::new() } }
 
 pub struct EpochGc {}
 impl EpochGc {
-	pub fn new() -> Self { EpochGc {} }
+	#[must_use]
+	pub const fn new() -> Self { Self {} }
+	#[allow(clippy::missing_const_for_fn)]
 	pub fn gc(&mut self, _epoch: u64) {}
 }
 impl Default for EpochGc { fn default() -> Self { Self::new() } }
@@ -296,6 +304,7 @@ pub struct SegmentFooter {
 }
 
 impl SegmentFooter {
+	#[must_use]
 	pub fn new(keys: &[Vec<u8>], key_range: (Vec<u8>, Vec<u8>), fence_keys: Vec<Vec<u8>>) -> Self {
 	let mut bloom = BloomFilter::new(1024, 3); // 1024 bits, 3 hash functions
 		for k in keys {
@@ -303,13 +312,14 @@ impl SegmentFooter {
 		}
 		// Encoding Bloom filter should not fail for a valid struct; if it does, use empty filter.
 		let bloom_bytes = encode_to_vec(&bloom, standard()).unwrap_or_else(|_| Vec::new());
-		SegmentFooter {
+		Self {
 			key_range,
 			fence_keys,
 			bloom_filter: bloom_bytes,
 		}
 	}
 
+	#[must_use]
 	pub fn might_contain(&self, key: &[u8]) -> bool {
 		match decode_from_slice::<BloomFilter, _>(&self.bloom_filter, standard()) {
 			Ok((bloom, _)) => bloom.contains(key),
@@ -326,7 +336,7 @@ pub struct SegmentFile {
 impl SegmentFile {
 	pub fn open(path: PathBuf) -> io::Result<Self> {
 		let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
-		Ok(SegmentFile { file })
+	Ok(Self { file })
 	}
 
 	pub fn flush_segment(&mut self, pages: &[Page], footer: &SegmentFooter) -> io::Result<()> {
@@ -384,7 +394,7 @@ impl TinyWal {
 	}
 	pub fn open(path: PathBuf) -> io::Result<Self> {
 		let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
-		Ok(TinyWal { file })
+	Ok(Self { file })
 	}
 
 	pub fn append(&mut self, record: &WalRecord) -> io::Result<()> {
@@ -924,11 +934,11 @@ pub struct Manifest {
 
 impl Manifest {
 	#[must_use]
-	pub fn new() -> Self {
+	pub const fn new() -> Self {
 		Self {
 			version: 1,
 			root_page_id: 0,
-			active_segments: vec![],
+			active_segments: Vec::new(),
 			wal_metadata: None,
 			next_page_id: 1,
 			free_pages: Vec::new(),

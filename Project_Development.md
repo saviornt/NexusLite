@@ -398,20 +398,6 @@ cargo clippy -q --all-targets --all-features -- -D warnings -W clippy::pedantic 
     - Insert/Update/Delete emit audit records via `telemetry::log_audit`; off by default, toggle with `telemetry::set_audit_enabled(true)`.
   - [x] Query logging with user/session metadata (hook; user optional)
   - [x] Extra hardening (e.g., input validation, output encoding, regex timeouts)
-
-### Sprint 6 - Feature Flags (runtime)
-
-- Added a minimal runtime feature flag registry (`feature_flags` module) exposed via API and CLI.
-- Initial flag: `crypto-pqc` — Post-quantum cryptography (ML-KEM, SPHINCS+).
-  - Description: Not currently available; stub for future work.
-  - Behavior: Any attempt to use PQC helpers returns a "feature not implemented" error. Enabling the flag does not activate functionality yet; it's reserved for future implementation.
-- CLI:
-  - `feature-list`
-  - `feature-enable <name>`
-  - `feature-disable <name>`
-- API:
-  - `feature_list`, `feature_set`, `feature_get`
-    - Regex remains feature-gated with length guards; timeouts best-effort via existing query deadline.
   - [x] Query timeouts and max result size enforcement
   - [x] Add Prometheus/OpenMetrics export (optional feature) for cache/engine/query stats
     - Minimal text exposition via `telemetry::metrics_text()` for `nexus_*` counters.
@@ -859,8 +845,22 @@ Notes
 - To continue past bad rows and log them, set `iopts.skip_errors = true` and `iopts.error_sidecar = Some("events.errors.jsonl".into())`.
 - Pandas reads exported NDJSON via `pd.read_json('export/events.jsonl', lines=True)`.
 
-CLI helpers:
+## CLI helpers
 
 - `nexuslite features-print` — show package/version, compiled features, runtime flags
 - `nexuslite features-check` — exit non-zero if unknown runtime flags are present
 - CI: `.github/workflows/features-check.yml` runs the above on push/PR
+
+## Feature Flags (runtime)
+
+- Added a minimal runtime feature flag registry (`feature_flags` module) exposed via API and CLI.
+- Initial flag: `crypto-pqc` — Post-quantum cryptography (ML-KEM, SPHINCS+).
+  - Description: Not currently available; stub for future work.
+  - Behavior: Any attempt to use PQC helpers returns a "feature not implemented" error. Enabling the flag does not activate functionality yet; it's reserved for future implementation.
+- CLI:
+  - `feature-list`
+  - `feature-enable <name>`
+  - `feature-disable <name>`
+- API:
+  - `feature_list`, `feature_set`, `feature_get`
+    - Regex remains feature-gated with length guards; timeouts best-effort via existing query deadline.

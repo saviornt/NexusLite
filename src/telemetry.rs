@@ -166,11 +166,14 @@ pub fn max_result_limit_for(collection: &str) -> usize {
     clippy::cast_sign_loss
 )]
 pub fn configure_rate_limit(collection: &str, capacity: u64, refill_per_sec: u64) {
-    let mut map = TELEMETRY.rate_limits.write();
+    #[allow(clippy::cast_precision_loss)]
     let cfg = TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill_per_sec as f64 };
-    let state = map.entry(collection.to_string()).or_insert_with(|| TokenBucketState { cfg: cfg.clone(), tokens: capacity as f64, last_refill: Instant::now() });
-    state.cfg = cfg;
-    if state.tokens > state.cfg.capacity { state.tokens = state.cfg.capacity; }
+    {
+        let mut map = TELEMETRY.rate_limits.write();
+        let state = map.entry(collection.to_string()).or_insert_with(|| TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
+        state.cfg = cfg;
+        if state.tokens > state.cfg.capacity { state.tokens = state.cfg.capacity; }
+    }
 }
 
 /// Remove a per-collection rate limit configuration.
@@ -179,81 +182,92 @@ pub fn remove_rate_limit(collection: &str) { TELEMETRY.rate_limits.write().remov
 /// Try to consume N tokens from the collection's bucket. Returns true if allowed.
 /// If no rate limit is configured, always returns true.
 pub fn try_consume_token(collection: &str, n: u64) -> bool {
-    #[allow(clippy::significant_drop_tightening, clippy::cast_precision_loss, clippy::suboptimal_flops)]
-    let mut map = TELEMETRY.rate_limits.write();
-    // Create default bucket if missing based on resource availability
-    if !map.contains_key(collection) {
-        let cfg = default_bucket_cfg();
-        map.insert(collection.to_string(), TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
-    }
-    let Some(state) = map.get_mut(collection) else { return true; };
-    // Refill based on elapsed time
-    let now = Instant::now();
-    let elapsed = now.duration_since(state.last_refill).as_secs_f64();
-    if elapsed > 0.0 {
-        state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
-        state.last_refill = now;
-    }
-    if state.tokens >= n as f64 {
-        state.tokens -= n as f64;
-        true
-    } else {
-        TELEMETRY.metrics.rate_limited_total.fetch_add(1, Ordering::Relaxed);
-        false
-    }
-}
-
-/// Peek at the bucket after a passive refill; returns true if request would be rate-limited.
-pub fn would_limit(collection: &str, n: u64) -> bool {
-    #[allow(clippy::significant_drop_tightening, clippy::cast_precision_loss, clippy::suboptimal_flops)]
-    let mut map = TELEMETRY.rate_limits.write();
-    if !map.contains_key(collection) {
-        let cfg = default_bucket_cfg();
-        map.insert(collection.to_string(), TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
-    }
-    let Some(state) = map.get_mut(collection) else { return false; };
-    let now = Instant::now();
-    let elapsed = now.duration_since(state.last_refill).as_secs_f64();
-    if elapsed > 0.0 {
-        state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
-        state.last_refill = now;
-    }
-    state.tokens < n as f64
-}
-
-/// Estimate milliseconds until enough tokens are available for `n`.
-pub fn retry_after_ms(collection: &str, n: u64) -> u64 {
-    #[allow(
-        clippy::significant_drop_tightening,
-        clippy::cast_precision_loss,
-        clippy::suboptimal_flops,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
-    let mut map = TELEMETRY.rate_limits.write();
-    if !map.contains_key(collection) {
-        let cfg = default_bucket_cfg();
-        map.insert(collection.to_string(), TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
-    }
-    if let Some(state) = map.get_mut(collection) {
+    #[allow(clippy::cast_precision_loss, clippy::suboptimal_flops)]
+    {
+        let mut map = TELEMETRY.rate_limits.write();
+        // Create default bucket if missing based on resource availability
+        if !map.contains_key(collection) {
+            let cfg = default_bucket_cfg();
+            map.insert(collection.to_string(), TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
+        }
+        let Some(state) = map.get_mut(collection) else { return true; };
+        // Refill based on elapsed time
         let now = Instant::now();
         let elapsed = now.duration_since(state.last_refill).as_secs_f64();
         if elapsed > 0.0 {
             state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
             state.last_refill = now;
         }
-        if state.tokens >= n as f64 { 0 }
-        else {
-            let need = n as f64 - state.tokens;
-            if state.cfg.refill_per_sec <= 0.0 { u64::MAX }
-            else { ((need / state.cfg.refill_per_sec) * 1000.0).ceil() as u64 }
+        if state.tokens >= n as f64 {
+            state.tokens -= n as f64;
+            // Explicitly release the lock before returning to tighten Drop.
+            drop(map);
+            return true;
         }
-    } else { 0 }
+        // Drop before falling through and recording rate_limited_total.
+        drop(map);
+    }
+    TELEMETRY.metrics.rate_limited_total.fetch_add(1, Ordering::Relaxed);
+    false
+}
+
+/// Peek at the bucket after a passive refill; returns true if request would be rate-limited.
+pub fn would_limit(collection: &str, n: u64) -> bool {
+    #[allow(clippy::cast_precision_loss, clippy::suboptimal_flops)]
+    {
+        let mut map = TELEMETRY.rate_limits.write();
+        if !map.contains_key(collection) {
+            let cfg = default_bucket_cfg();
+            map.insert(collection.to_string(), TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
+        }
+    let Some(state) = map.get_mut(collection) else { drop(map); return false; };
+        let now = Instant::now();
+        let elapsed = now.duration_since(state.last_refill).as_secs_f64();
+        if elapsed > 0.0 {
+            state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
+            state.last_refill = now;
+        }
+    let limited = state.tokens < n as f64;
+    drop(map);
+    return limited;
+    }
+}
+
+/// Estimate milliseconds until enough tokens are available for `n`.
+pub fn retry_after_ms(collection: &str, n: u64) -> u64 {
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::suboptimal_flops,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    {
+        let mut map = TELEMETRY.rate_limits.write();
+        if !map.contains_key(collection) {
+            let cfg = default_bucket_cfg();
+            map.insert(collection.to_string(), TokenBucketState { cfg: cfg.clone(), tokens: cfg.capacity, last_refill: Instant::now() });
+        }
+        if let Some(state) = map.get_mut(collection) {
+            let now = Instant::now();
+            let elapsed = now.duration_since(state.last_refill).as_secs_f64();
+            if elapsed > 0.0 {
+                state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
+                state.last_refill = now;
+            }
+            if state.tokens >= n as f64 { 0 }
+            else {
+                let need = n as f64 - state.tokens;
+                if state.cfg.refill_per_sec <= 0.0 { u64::MAX }
+                else { ((need / state.cfg.refill_per_sec) * 1000.0).ceil() as u64 }
+            }
+        } else { 0 }
+    }
 }
 
 /// Set a default rate limit used for collections without explicit config.
 pub fn set_default_rate_limit(capacity: u64, refill_per_sec: u64) {
-    *TELEMETRY.default_rate.write() = Some(TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill_per_sec as f64 });
+    #[allow(clippy::cast_precision_loss)]
+    { *TELEMETRY.default_rate.write() = Some(TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill_per_sec as f64 }); }
 }
 
 /// Log a rate-limited event for observability.
@@ -280,6 +294,7 @@ fn default_bucket_cfg() -> TokenBucketCfg {
     let cores = std::thread::available_parallelism().map(std::num::NonZeroUsize::get).unwrap_or(4);
     let capacity = cap_env.unwrap_or_else(|| (cores as u64).saturating_mul(100).max(200));
     let refill = rps_env.unwrap_or_else(|| (cores as u64).saturating_mul(50).max(100));
+    #[allow(clippy::cast_precision_loss)]
     let cfg = TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill as f64 };
     *TELEMETRY.default_rate.write() = Some(cfg.clone());
     cfg

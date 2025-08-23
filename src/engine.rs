@@ -44,15 +44,14 @@ impl Engine {
     }
 
     pub fn create_collection(&self, name: String) -> Arc<Collection> {
-        let mut collections = self.collections.write();
         let collection = Arc::new(Collection::new(
             name.clone(),
             self.storage.clone(),
             DEFAULT_CACHE_CAPACITY,
         ));
-        collections.insert(name, collection.clone());
-    // Attempt to rebuild indexes for this collection if metadata exists
-    self.load_collection_indexes(&collection);
+        self.collections.write().insert(name, collection.clone());
+        // Attempt to rebuild indexes for this collection if metadata exists
+        self.load_collection_indexes(&collection);
         collection
     }
 
@@ -83,19 +82,26 @@ impl Engine {
     ///
     /// # Errors
     /// Returns `NoSuchCollection` if `old` doesn't exist or `CollectionAlreadyExists` if `new` already exists.
+    ///
+    /// # Panics
+    /// Panics only if the internal insertion into the collection map fails during re-insertion, which
+    /// should not occur under normal operation.
     pub fn rename_collection(&self, old: &str, new: &str) -> Result<(), crate::errors::DbError> {
-        let mut map = self.collections.write();
-        if !map.contains_key(old) {
-            return Err(crate::errors::DbError::NoSuchCollection(old.to_string()));
+        let (mut col, mut should_insert) = (None, false);
+        {
+            let mut map = self.collections.write();
+            if !map.contains_key(old) {
+                return Err(crate::errors::DbError::NoSuchCollection(old.to_string()));
+            }
+            if map.contains_key(new) {
+                return Err(crate::errors::DbError::CollectionAlreadyExists(new.to_string()));
+            }
+            if let Some(c) = map.remove(old) { col = Some(c); should_insert = true; }
         }
-        if map.contains_key(new) {
-            return Err(crate::errors::DbError::CollectionAlreadyExists(new.to_string()));
+        if should_insert {
+            if let Some(c) = &col { c.set_name(new.to_string()); }
+            self.collections.write().insert(new.to_string(), col.unwrap());
         }
-        let Some(col) = map.remove(old) else {
-            return Err(crate::errors::DbError::NoSuchCollection(old.to_string()));
-        };
-    col.set_name(new.to_string());
-    map.insert(new.to_string(), col);
         Ok(())
     }
 }
