@@ -25,3 +25,15 @@ jobs:
         run: |
           cd fuzz
           cargo fuzz run fuzz_update_parser -- -runs=2000 -timeout=5
+      - name: Run fuzz smoke (eval)
+        run: |
+          cd fuzz
+          cargo fuzz run fuzz_eval -- -runs=2000 -timeout=5
+      - name: Run fuzz smoke (ndjson import)
+        run: |
+          cd fuzz
+          cargo fuzz run fuzz_ndjson_import -- -runs=2000 -timeout=5
+      - name: Run fuzz smoke (csv import)
+        run: |
+          cd fuzz
+          cargo fuzz run fuzz_csv_import -- -runs=2000 -timeout=5
