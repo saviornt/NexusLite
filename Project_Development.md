@@ -478,7 +478,7 @@ cargo clippy -q --all-targets --all-features -- -D warnings -W clippy::pedantic 
   - [ ] Go
   - [ ] C and C++
   - [ ] Rust
-  - [ ] Binary executable
+  - [ ] Binary executables for Windows, Linux, and macOS
 
 - [ ] Verify .gitignore entries
 

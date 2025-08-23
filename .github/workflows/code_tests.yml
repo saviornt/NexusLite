@@ -1,0 +1,268 @@
+# This workflow consolidates various CI and testing jobs into a single file.
+# It now runs all tests on both Ubuntu and Windows to ensure platform compatibility.
+
+name: Code Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  # A single, comprehensive CRON job to run all checks weekly.
+  # This runs every Monday at 03:00 UTC.
+  schedule:
+    - cron: '0 3 * * 1'
+  # Allows for manual triggering of the workflow from the GitHub Actions UI.
+  workflow_dispatch:
+
+jobs:
+  # Build and Linting Jobs
+  # ---
+  # These jobs ensure the code compiles and adheres to style and security standards.
+
+  build-and-lint:
+    name: Build & Lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target
+          key: ${{ runner.os }}-cargo-main-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-main-
+      - name: Build all workspaces
+        run: cargo build --workspace --all-features --quiet
+      - name: Run Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery
+      - name: Run Rustfmt check
+        run: cargo fmt --all -- --check
+      - name: Run features print
+        run: cargo run --quiet --bin nexuslite -- features-print
+      - name: Run features check
+        run: cargo run --quiet --bin nexuslite -- features-check
+
+  security-audit:
+    name: Security Audit
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target
+          key: ${{ runner.os }}-cargo-security-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-security-
+      - name: Install audit tools
+        run: |
+          cargo install cargo-audit --force
+          cargo install cargo-deny --force
+      - name: Run Cargo audit (non-blocking) and save report
+        id: audit
+        continue-on-error: true
+        run: |
+          cargo audit --deny warnings > cargo-audit-report.txt || true
+      - name: Run Cargo deny (bans/licenses/sources)
+        run: cargo deny check --all-features
+      - name: Report audit status
+        if: always()
+        run: |
+          if [ "${{ steps.audit.outcome }}" = "failure" ]; then
+            echo "cargo audit failed; continuing to run other checks.";
+          fi
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-audit-report-${{ matrix.os }}
+          path: cargo-audit-report.txt
+
+  # Testing Jobs
+  # ---
+  # These jobs run various tests to ensure code correctness and robustness.
+
+  run-tests:
+    name: Run Tests
+    needs: build-and-lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+      - name: Run all tests
+        run: cargo test --workspace --all-features --quiet
+
+  miri:
+    name: Miri (UB checker)
+    needs: build-and-lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust nightly toolchain with Miri component
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target
+          key: ${{ runner.os }}-cargo-miri-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-miri-
+      - name: Setup Miri
+        run: |
+          rustup component add miri
+          cargo miri setup
+      - name: Run tests under Miri and save report
+        run: |
+          cargo miri test --workspace --all-features > miri-report.txt || true
+      - name: Upload Miri report
+        uses: actions/upload-artifact@v4
+        with:
+          name: miri-report-${{ matrix.os }}
+          path: miri-report.txt
+
+  cargo-mutants:
+    name: Mutation Tests
+    needs: build-and-lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants
+      - name: Run mutation tests and save report
+        run: |
+          cargo mutants -v > mutants-report.txt || true
+      - name: Upload mutation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report-${{ matrix.os }}
+          path: mutants-report.txt
+
+  fuzz-smoke-tests:
+    name: Fuzz Smoke
+    needs: build-and-lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version ^0.12
+      - name: Build fuzz targets
+        run: |
+          cd fuzz
+          cargo fuzz build
+      - name: Run fuzz smoke and save reports
+        run: |
+          mkdir -p reports
+          cd fuzz
+          cargo fuzz run fuzz_filter_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-filter-report.txt || true
+          cargo fuzz run fuzz_update_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-update-report.txt || true
+          cargo fuzz run fuzz_eval -- -runs=2000 -timeout=5 > ../reports/fuzz-eval-report.txt || true
+          cargo fuzz run fuzz_ndjson_import -- -runs=2000 -timeout=5 > ../reports/fuzz-ndjson-report.txt || true
+          cargo fuzz run fuzz_csv_import -- -runs=2000 -timeout=5 > ../reports/fuzz-csv-report.txt || true
+      - name: Upload fuzz reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-reports-${{ matrix.os }}
+          path: reports
+
+  # A template for running tests for different language bindings.
+  # This is commented out as it's not yet in development.
+  # To enable, uncomment this job block and add your specific steps.
+  # ---
+  # language-bindings-tests:
+  #   name: Language Bindings Tests
+  #   needs: run-tests
+  #   runs-on: ubuntu-latest
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       language: [python, nodejs] # Add other languages as needed
+  #   if: always()
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #     - name: Setup ${{ matrix.language }}
+  #       # Add steps to set up the environment for the specific language
+  #       # For Python: uses: actions/setup-python@v5
+  #       # For Node.js: uses: actions/setup-node@v4
+  #     - name: Run tests for ${{ matrix.language }}
+  #       # Add commands to install dependencies and run tests for your library.
+  #       # For example, for Python:
+  #       # run: |
+  #       #   pip install -r python/requirements.txt
+  #       #   pytest python/tests
