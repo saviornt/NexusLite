@@ -40,11 +40,10 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Report audit status
         if: always()
-        - shell: pwsh
-          run: |
-            if ('${{ steps.audit.outcome }}' -eq 'failure') {
-              Write-Host 'cargo audit failed; continuing to run other checks as requested.'
-            } else {
-              Write-Host 'cargo audit passed.'
-            }
+        shell: pwsh
+        run: |
+          if ('${{ steps.audit.outcome }}' -eq 'failure') {
+            Write-Host 'cargo audit failed; continuing to run other checks as requested.'
+          } else {
+            Write-Host 'cargo audit passed.'
           }
