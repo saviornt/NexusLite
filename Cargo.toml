@@ -6,6 +6,7 @@ path = "benchmarks/benchmark_wasp.rs"
 name = "nexus_lite"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 bincode = { version = "2.0.1", features = ["serde", "derive"]}

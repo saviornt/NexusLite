@@ -37,10 +37,11 @@ impl Hash for EqKey {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OrdKey(IndexKeyKind);
 
+#[must_use]
 pub fn key_from_bson(v: &Bson) -> Option<IndexKeyKind> {
     match v {
         Bson::String(s) => Some(IndexKeyKind::Str(s.clone())),
-        Bson::Int32(i) => Some(IndexKeyKind::I64(*i as i64)),
+    Bson::Int32(i) => Some(IndexKeyKind::I64(i64::from(*i))),
         Bson::Int64(i) => Some(IndexKeyKind::I64(*i)),
     Bson::Double(f) => Some(IndexKeyKind::F64(OrderedFloat(*f))),
         Bson::Boolean(b) => Some(IndexKeyKind::Bool(*b)),
@@ -66,6 +67,7 @@ pub struct HashIndex {
 }
 
 impl HashIndex {
+    #[must_use]
     pub fn new(field: String) -> Self { Self { field, map: HashMap::new(), stats: IndexStats::default() } }
     pub fn insert(&mut self, doc: &BsonDocument, id: &DocumentId) {
         if let Some(v) = get_path(doc, &self.field)
@@ -103,6 +105,7 @@ pub struct BTreeIndex {
 }
 
 impl BTreeIndex {
+    #[must_use]
     pub fn new(field: String) -> Self { Self { field, map: BTreeMap::new(), stats: IndexStats::default() } }
     pub fn insert(&mut self, doc: &BsonDocument, id: &DocumentId) {
         if let Some(v) = get_path(doc, &self.field)
@@ -159,12 +162,14 @@ pub struct IndexManager {
 }
 
 impl IndexManager {
+    #[must_use]
     pub fn new() -> Self { Self { indexes: HashMap::new() } }
     pub fn create_index(&mut self, field: &str, kind: IndexKind) {
         let idx = match kind { IndexKind::Hash => IndexImpl::Hash(HashIndex::new(field.to_string())), IndexKind::BTree => IndexImpl::BTree(BTreeIndex::new(field.to_string())) };
         self.indexes.insert(field.to_string(), idx);
     }
     pub fn drop_index(&mut self, field: &str) { self.indexes.remove(field); }
+    #[must_use]
     pub fn descriptors(&self) -> Vec<IndexDescriptor> {
         self.indexes.iter().map(|(f, i)| IndexDescriptor { field: f.clone(), kind: match i { IndexImpl::Hash(_) => IndexKind::Hash, IndexImpl::BTree(_) => IndexKind::BTree } }).collect()
     }

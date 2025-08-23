@@ -15,8 +15,9 @@ use nexus_lite::engine::Engine;
 async fn main() {
 	// Create unique temp directories without tempfile crate
 	let base = std::env::temp_dir();
-	let wal_dir = base.join(format!("nexuslite_wal_{}", uuid::Uuid::new_v4()));
-	let wasp_dir = base.join(format!("nexuslite_wasp_{}", uuid::Uuid::new_v4()));
+	let uuid = uuid::Uuid::new_v4();
+	let wal_dir = base.join(format!("nexuslite_wal_{uuid}"));
+	let wasp_dir = base.join(format!("nexuslite_wasp_{uuid}"));
 	create_dir_all(&wal_dir).unwrap();
 	create_dir_all(&wasp_dir).unwrap();
 
@@ -30,7 +31,7 @@ async fn main() {
 	let col_wal = engine_wal.create_collection_with_config("bench".into(), CacheConfig { capacity: n + 16, ..Default::default() });
 	let start_insert_wal = Instant::now();
 	for i in 0..n {
-		let d = Document::new(doc!{"i": i as i64, "payload": format!("x{}", i)}, DocumentType::Persistent);
+		let d = Document::new(doc!{"i": i as i64, "payload": format!("x{i}")}, DocumentType::Persistent);
 		let _ = col_wal.insert_document(d);
 	}
 	let insert_wal_ns = start_insert_wal.elapsed().as_nanos();
@@ -45,7 +46,7 @@ async fn main() {
 	let col_wasp = engine_wasp.create_collection_with_config("bench".into(), CacheConfig { capacity: n + 16, ..Default::default() });
 	let start_insert_wasp = Instant::now();
 	for i in 0..n {
-		let d = Document::new(doc!{"i": i as i64, "payload": format!("x{}", i)}, DocumentType::Persistent);
+		let d = Document::new(doc!{"i": i as i64, "payload": format!("x{i}")}, DocumentType::Persistent);
 		let _ = col_wasp.insert_document(d);
 	}
 	let insert_wasp_ns = start_insert_wasp.elapsed().as_nanos();
@@ -62,7 +63,7 @@ async fn main() {
 
 	let now = chrono::Utc::now();
 	let datetime = now.format("%Y%m%d_%H%M%S");
-	let unique = format!("benchmark_crashStorage_{}.csv", datetime);
+	let unique = format!("benchmark_crashStorage_{datetime}.csv");
 	let mut f = File::create(root.join(&unique)).unwrap();
 	writeln!(f, "backend,insert_ns,read_ns").unwrap();
 	writeln!(f, "WAL,{insert_wal_ns},{read_wal_ns}").unwrap();

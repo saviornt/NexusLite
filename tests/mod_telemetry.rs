@@ -12,7 +12,7 @@ fn telemetry_default_rate_limit_is_set() {
     // Might be false (fresh bucket full); consume aggressively to trigger limit
     for _ in 0..10 { let _ = nexus_lite::telemetry::try_consume_token(collection, 1); }
     let limited_after = nexus_lite::telemetry::would_limit(collection, 1);
-    assert!(limited_before == false || limited_after == true);
+    assert!(!limited_before || limited_after);
 }
 
 #[test]

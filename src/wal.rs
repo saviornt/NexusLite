@@ -10,15 +10,19 @@ pub struct Wal {
 }
 
 impl Wal {
+    /// # Errors
+    /// Returns an error if the WAL file cannot be opened.
     pub fn new(path: PathBuf) -> io::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .read(true)
             .open(path)?;
-        Ok(Wal { file })
+        Ok(Self { file })
     }
 
+    /// # Errors
+    /// Returns an error if the operation cannot be written to the WAL.
     pub fn append(&mut self, operation: &Operation) -> io::Result<()> {
     let encoded = encode_to_vec(operation, standard()).map_err(io::Error::other)?;
         self.file.write_all(&(encoded.len() as u64).to_be_bytes())?;
@@ -26,6 +30,8 @@ impl Wal {
         self.file.flush()
     }
 
+    /// # Errors
+    /// Returns an error if the WAL cannot be read.
     pub fn read_all(&self) -> io::Result<Vec<Result<Operation, bincode::error::DecodeError>>> {
         let mut file = self.file.try_clone()?;
         file.seek(io::SeekFrom::Start(0))?;
@@ -42,11 +48,11 @@ impl Wal {
                 Err(_) => break,
             };
             offset += 8;
-            if offset + len as usize > buffer.len() { break; }
-            let encoded_op = &buffer[offset..offset + len as usize];
+            if offset + usize::try_from(len).unwrap_or(usize::MAX) > buffer.len() { break; }
+            let encoded_op = &buffer[offset..offset + usize::try_from(len).unwrap_or(0)];
             let operation = decode_from_slice::<crate::types::Operation, _>(encoded_op, standard());
             operations.push(operation.map(|(op, _)| op));
-            offset += len as usize;
+            offset += usize::try_from(len).unwrap_or(0);
         }
 
         Ok(operations)

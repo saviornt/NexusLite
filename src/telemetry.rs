@@ -55,7 +55,7 @@ pub struct Telemetry {
     default_rate: RwLock<Option<TokenBucketCfg>>,
 }
 
-pub(crate) static TELEMETRY: once_cell::sync::Lazy<Telemetry> = once_cell::sync::Lazy::new(|| Telemetry::default());
+pub(crate) static TELEMETRY: std::sync::LazyLock<Telemetry> = std::sync::LazyLock::new(Telemetry::default);
 
 pub fn set_db_name(db: &str) { TELEMETRY.cfg.write().current_db = Some(db.to_string()); }
 pub fn set_query_log(path: PathBuf, slow_query_ms: Option<u64>, structured_json: Option<bool>) {
@@ -70,7 +70,7 @@ pub fn set_audit_sink_for_tests(sink: Arc<RwLock<Vec<String>>>) { *TELEMETRY.aud
 
 fn write_line(path: &PathBuf, line: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        use std::io::Write; let _ = writeln!(f, "{}", line);
+    use std::io::Write; let _ = writeln!(f, "{line}");
     }
 }
 
@@ -87,7 +87,7 @@ pub fn log_query(collection: &str, filter_dbg: &str, duration_ms: u128, limit: O
     TELEMETRY.metrics.queries_total.fetch_add(1, Ordering::Relaxed);
     let cfg = TELEMETRY.cfg.read().clone();
     let filter_hash = sha256_hex(filter_dbg);
-    let slow = duration_ms as u64 >= cfg.slow_query_ms;
+    let slow = match u64::try_from(duration_ms) { Ok(ms) => ms >= cfg.slow_query_ms, Err(_) => true };
     if slow { TELEMETRY.metrics.queries_slow_total.fetch_add(1, Ordering::Relaxed); }
     if let Some(path) = cfg.query_log_path.as_ref() {
         if cfg.structured_json {
@@ -96,7 +96,7 @@ pub fn log_query(collection: &str, filter_dbg: &str, duration_ms: u128, limit: O
                 "db": cfg.current_db.as_deref().unwrap_or("default"),
                 "collection": collection,
                 "filter_hash": filter_hash,
-                "duration_ms": duration_ms as u64,
+                "duration_ms": u64::try_from(duration_ms).unwrap_or(u64::MAX),
                 "limit": limit,
                 "skip": skip,
                 "user": user,
@@ -118,10 +118,13 @@ pub fn log_audit(op: &str, collection: &str, doc_id: &str, user: Option<&str>) {
     "ts": now_ts(), "db": TELEMETRY.cfg.read().current_db.clone().unwrap_or_else(||"default".into()),
         "op": op, "collection": collection, "doc_id": doc_id, "user": user
     }).to_string();
-    if let Some(sink) = TELEMETRY.audit_sink.read().clone() { sink.write().push(line.clone()); }
-    if let Some(path) = TELEMETRY.cfg.read().query_log_path.as_ref() { write_line(path, &line); }
+    let audit_clone = TELEMETRY.audit_sink.read().clone();
+    if let Some(sink) = audit_clone { sink.write().push(line.clone()); }
+    let log_path = TELEMETRY.cfg.read().query_log_path.clone();
+    if let Some(path) = log_path.as_ref() { write_line(path, &line); }
 }
 
+#[must_use]
 pub fn metrics_text() -> String {
     // OpenMetrics/Prometheus exposition format (no types/HELP for brevity)
     let m = &TELEMETRY.metrics;
@@ -145,13 +148,23 @@ pub fn set_max_result_limit_global(limit: usize) { TELEMETRY.cfg.write().max_res
 pub fn set_max_result_limit_for(collection: &str, limit: usize) { TELEMETRY.cfg.write().per_collection_max.insert(collection.to_string(), limit); }
 pub fn max_result_limit_for(collection: &str) -> usize {
     let cfg = TELEMETRY.cfg.read();
-    if let Some(v) = cfg.per_collection_max.get(collection) { *v } else { cfg.max_result_limit }
+    cfg.per_collection_max
+        .get(collection)
+        .copied()
+        .unwrap_or(cfg.max_result_limit)
 }
 
 // --- Rate limiting (basic token bucket, per collection) ---
 
 /// Configure or update a per-collection token bucket.
-/// capacity: max tokens; refill_per_sec: tokens added per second.
+/// capacity: max tokens; `refill_per_sec`: tokens added per second.
+#[allow(
+    clippy::significant_drop_tightening,
+    clippy::cast_precision_loss,
+    clippy::suboptimal_flops,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn configure_rate_limit(collection: &str, capacity: u64, refill_per_sec: u64) {
     let mut map = TELEMETRY.rate_limits.write();
     let cfg = TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill_per_sec as f64 };
@@ -166,6 +179,7 @@ pub fn remove_rate_limit(collection: &str) { TELEMETRY.rate_limits.write().remov
 /// Try to consume N tokens from the collection's bucket. Returns true if allowed.
 /// If no rate limit is configured, always returns true.
 pub fn try_consume_token(collection: &str, n: u64) -> bool {
+    #[allow(clippy::significant_drop_tightening, clippy::cast_precision_loss, clippy::suboptimal_flops)]
     let mut map = TELEMETRY.rate_limits.write();
     // Create default bucket if missing based on resource availability
     if !map.contains_key(collection) {
@@ -177,7 +191,7 @@ pub fn try_consume_token(collection: &str, n: u64) -> bool {
     let now = Instant::now();
     let elapsed = now.duration_since(state.last_refill).as_secs_f64();
     if elapsed > 0.0 {
-        state.tokens = (state.tokens + state.cfg.refill_per_sec * elapsed).min(state.cfg.capacity);
+        state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
         state.last_refill = now;
     }
     if state.tokens >= n as f64 {
@@ -191,6 +205,7 @@ pub fn try_consume_token(collection: &str, n: u64) -> bool {
 
 /// Peek at the bucket after a passive refill; returns true if request would be rate-limited.
 pub fn would_limit(collection: &str, n: u64) -> bool {
+    #[allow(clippy::significant_drop_tightening, clippy::cast_precision_loss, clippy::suboptimal_flops)]
     let mut map = TELEMETRY.rate_limits.write();
     if !map.contains_key(collection) {
         let cfg = default_bucket_cfg();
@@ -200,7 +215,7 @@ pub fn would_limit(collection: &str, n: u64) -> bool {
     let now = Instant::now();
     let elapsed = now.duration_since(state.last_refill).as_secs_f64();
     if elapsed > 0.0 {
-        state.tokens = (state.tokens + state.cfg.refill_per_sec * elapsed).min(state.cfg.capacity);
+        state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
         state.last_refill = now;
     }
     state.tokens < n as f64
@@ -208,6 +223,13 @@ pub fn would_limit(collection: &str, n: u64) -> bool {
 
 /// Estimate milliseconds until enough tokens are available for `n`.
 pub fn retry_after_ms(collection: &str, n: u64) -> u64 {
+    #[allow(
+        clippy::significant_drop_tightening,
+        clippy::cast_precision_loss,
+        clippy::suboptimal_flops,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let mut map = TELEMETRY.rate_limits.write();
     if !map.contains_key(collection) {
         let cfg = default_bucket_cfg();
@@ -217,7 +239,7 @@ pub fn retry_after_ms(collection: &str, n: u64) -> u64 {
         let now = Instant::now();
         let elapsed = now.duration_since(state.last_refill).as_secs_f64();
         if elapsed > 0.0 {
-            state.tokens = (state.tokens + state.cfg.refill_per_sec * elapsed).min(state.cfg.capacity);
+            state.tokens = state.cfg.refill_per_sec.mul_add(elapsed, state.tokens).min(state.cfg.capacity);
             state.last_refill = now;
         }
         if state.tokens >= n as f64 { 0 }
@@ -251,10 +273,11 @@ pub fn log_rate_limited(collection: &str, op: &str) {
 
 fn default_bucket_cfg() -> TokenBucketCfg {
     // Compute once and cache; allow env overrides
-    if let Some(cfg) = TELEMETRY.default_rate.read().clone() { return cfg; }
+    let value = TELEMETRY.default_rate.read().clone();
+    if let Some(cfg) = value { return cfg; }
     let cap_env = std::env::var("NEXUS_DEFAULT_RATE_CAP").ok().and_then(|s| s.parse::<u64>().ok());
     let rps_env = std::env::var("NEXUS_DEFAULT_RATE_RPS").ok().and_then(|s| s.parse::<u64>().ok());
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let cores = std::thread::available_parallelism().map(std::num::NonZeroUsize::get).unwrap_or(4);
     let capacity = cap_env.unwrap_or_else(|| (cores as u64).saturating_mul(100).max(200));
     let refill = rps_env.unwrap_or_else(|| (cores as u64).saturating_mul(50).max(100));
     let cfg = TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill as f64 };

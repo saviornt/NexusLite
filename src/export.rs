@@ -25,6 +25,10 @@ impl Default for ExportOptions {
 #[derive(Debug, Default)]
 pub struct ExportReport { pub written: u64 }
 
+/// Export a collection to a file atomically via a temp file + persist.
+///
+/// # Errors
+/// Returns an error if the destination cannot be created or the write/persist fails.
 pub fn export_file(engine: &Engine, collection: &str, path: impl AsRef<Path>, opts: &ExportOptions) -> io::Result<ExportReport> {
     log::info!("export: collection={}, path={}", collection, path.as_ref().display());
     let dest = path.as_ref();
@@ -54,6 +58,10 @@ pub fn export_file(engine: &Engine, collection: &str, path: impl AsRef<Path>, op
 
 //
 
+/// Export a collection directly to a newly created file at `path`.
+///
+/// # Errors
+/// Returns an error if the file cannot be created or writing fails.
 pub fn export_to_writer(engine: &Engine, collection: &str, path: impl AsRef<Path>, opts: &ExportOptions) -> io::Result<ExportReport> {
     let file = File::create(path)?;
     export_into_writer(engine, collection, file, opts)
@@ -73,7 +81,7 @@ fn export_into_writer<W: Write>(engine: &Engine, collection: &str, writer: W, op
                 if let Some(fields) = redact { apply_redaction(&mut doc, fields); }
                 let v = bson::to_bson(&doc).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 let s = serde_json::to_string(&v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                writeln!(writer, "{}", s)?;
+                writeln!(writer, "{s}")?;
                 report.written += 1;
                 }
             }

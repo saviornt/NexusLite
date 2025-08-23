@@ -94,6 +94,7 @@ impl Cursor {
         self.pos += 1;
         self.collection.find_document(&id)
     }
+    #[must_use]
     pub fn to_vec(mut self) -> Vec<Document> {
         if let Some(docs) = self.docs.take() {
             return docs;
@@ -141,23 +142,23 @@ impl TryFrom<FilterSerde> for Filter {
     fn try_from(fs: FilterSerde) -> Result<Self, Self::Error> {
         use FilterSerde as FS;
         Ok(match fs {
-            FS::And { and } => Filter::And(and.into_iter().map(Filter::try_from).collect::<Result<_, _>>()?),
-            FS::Or { or } => Filter::Or(or.into_iter().map(Filter::try_from).collect::<Result<_, _>>()?),
-            FS::Not { not } => Filter::Not(Box::new(Filter::try_from(*not)?)),
-            FS::Exists { field, exists } => Filter::Exists { path: field, exists },
+            FS::And { and } => Self::And(and.into_iter().map(Self::try_from).collect::<Result<_, _>>()?),
+            FS::Or { or } => Self::Or(or.into_iter().map(Self::try_from).collect::<Result<_, _>>()?),
+            FS::Not { not } => Self::Not(Box::new(Self::try_from(*not)?)),
+            FS::Exists { field, exists } => Self::Exists { path: field, exists },
             FS::Cmp { field, eq, gt, gte, lt, lte } => {
-                if let Some(v) = *eq { Filter::Cmp { path: field, op: CmpOp::Eq, value: v } }
-                else if let Some(v) = *gt { Filter::Cmp { path: field, op: CmpOp::Gt, value: v } }
-                else if let Some(v) = *gte { Filter::Cmp { path: field, op: CmpOp::Gte, value: v } }
-                else if let Some(v) = *lt { Filter::Cmp { path: field, op: CmpOp::Lt, value: v } }
-                else if let Some(v) = *lte { Filter::Cmp { path: field, op: CmpOp::Lte, value: v } }
+                if let Some(v) = *eq { Self::Cmp { path: field, op: CmpOp::Eq, value: v } }
+                else if let Some(v) = *gt { Self::Cmp { path: field, op: CmpOp::Gt, value: v } }
+                else if let Some(v) = *gte { Self::Cmp { path: field, op: CmpOp::Gte, value: v } }
+                else if let Some(v) = *lt { Self::Cmp { path: field, op: CmpOp::Lt, value: v } }
+                else if let Some(v) = *lte { Self::Cmp { path: field, op: CmpOp::Lte, value: v } }
                 else { return Err(crate::errors::DbError::QueryError("No comparison operator provided".into())); }
             }
-            FS::In { field, in_vals } => Filter::In { path: field, values: in_vals.into_iter().take(MAX_IN_SET).collect() },
-            FS::Nin { field, nin_vals } => Filter::Nin { path: field, values: nin_vals.into_iter().take(MAX_IN_SET).collect() },
+            FS::In { field, in_vals } => Self::In { path: field, values: in_vals.into_iter().take(MAX_IN_SET).collect() },
+            FS::Nin { field, nin_vals } => Self::Nin { path: field, values: nin_vals.into_iter().take(MAX_IN_SET).collect() },
             #[cfg(feature = "regex")]
-            FS::Regex { field, pattern, case_insensitive } => Filter::Regex { path: field, pattern, case_insensitive },
-            FS::True(b) => if b { Filter::True } else { Filter::Not(Box::new(Filter::True)) },
+            FS::Regex { field, pattern, case_insensitive } => Self::Regex { path: field, pattern, case_insensitive },
+            FS::True(b) => if b { Self::True } else { Self::Not(Box::new(Self::True)) },
         })
     }
 }
@@ -175,7 +176,7 @@ pub struct UpdateDocSerde {
 impl TryFrom<UpdateDocSerde> for UpdateDoc {
     type Error = crate::errors::DbError;
     fn try_from(us: UpdateDocSerde) -> Result<Self, Self::Error> {
-        let mut out = UpdateDoc::default();
+    let mut out = Self::default();
     if let Some(setd) = us.set {
             for (k, v) in setd.into_iter().take(128) {
                 out.set.push((k, v));
@@ -183,7 +184,8 @@ impl TryFrom<UpdateDocSerde> for UpdateDoc {
         }
     if let Some(incd) = us.inc {
             for (k, v) in incd.into_iter().take(128) {
-                let f = match v { Bson::Int32(i) => i as f64, Bson::Int64(i) => i as f64, Bson::Double(d) => d, _ => return Err(crate::errors::DbError::QueryError("$inc requires numeric".into())) };
+                #[allow(clippy::cast_precision_loss)]
+                let f = match v { Bson::Int32(i) => f64::from(i), Bson::Int64(i) => i as f64, Bson::Double(d) => d, _ => return Err(crate::errors::DbError::QueryError("$inc requires numeric".into())) };
                 out.inc.push((k, f));
             }
         }
@@ -192,11 +194,15 @@ impl TryFrom<UpdateDocSerde> for UpdateDoc {
     }
 }
 
+/// # Errors
+/// Returns an error if the JSON string cannot be parsed into a filter structure.
 pub fn parse_filter_json(json: &str) -> Result<Filter, crate::errors::DbError> {
     let fs: FilterSerde = serde_json::from_str(json)?;
     Filter::try_from(fs)
 }
 
+/// # Errors
+/// Returns an error if the JSON string cannot be parsed into an update structure.
 pub fn parse_update_json(json: &str) -> Result<UpdateDoc, crate::errors::DbError> {
     let us: UpdateDocSerde = serde_json::from_str(json)?;
     UpdateDoc::try_from(us)
@@ -209,7 +215,7 @@ pub fn update_many(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) -
     let ids: Vec<DocumentId> = col
         .list_ids()
         .into_iter()
-        .filter(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
+        .filter(|id| col.find_document(id).is_some_and(|d| eval_filter(&d.data.0, filter)))
         .collect();
     for id in ids {
         if let Some(mut doc) = col.find_document(&id) {
@@ -227,12 +233,12 @@ pub fn update_one(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) ->
     if let Some(id) = col
         .list_ids()
         .into_iter()
-        .find(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
+        .find(|id| col.find_document(id).is_some_and(|d| eval_filter(&d.data.0, filter)))
         && let Some(mut doc) = col.find_document(&id)
     {
         let changed = apply_update(&mut doc, update);
         col.update_document(&id, doc);
-        return UpdateReport { matched: 1, modified: if changed { 1 } else { 0 } };
+    return UpdateReport { matched: 1, modified: u64::from(changed) };
     }
     UpdateReport { matched: 0, modified: 0 }
 }
@@ -242,7 +248,7 @@ pub fn delete_many(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
     let ids: Vec<DocumentId> = col
         .list_ids()
         .into_iter()
-        .filter(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
+        .filter(|id| col.find_document(id).is_some_and(|d| eval_filter(&d.data.0, filter)))
         .collect();
     for id in ids {
         if col.delete_document(&id) { deleted += 1; }
@@ -254,9 +260,9 @@ pub fn delete_one(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
     if let Some(id) = col
         .list_ids()
         .into_iter()
-        .find(|id| col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false))
+        .find(|id| col.find_document(id).is_some_and(|d| eval_filter(&d.data.0, filter)))
     {
-        let deleted = if col.delete_document(&id) { 1 } else { 0 };
+    let deleted = u64::from(col.delete_document(&id));
         return DeleteReport { deleted };
     }
     DeleteReport { deleted: 0 }
@@ -272,15 +278,12 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
     // If no projection is needed, prefer a lazy path accumulating only IDs to avoid cloning many docs.
     if !needs_projection && opts.sort.is_none() {
         // Try to get candidate IDs from index, else all IDs
-        let mut ids: Vec<crate::types::DocumentId> = if let Some(cands) = plan_index_candidates(col, filter) {
-            cands
-        } else {
-            col.list_ids()
-        };
+        let mut ids: Vec<crate::types::DocumentId> =
+            plan_index_candidates(col, filter).map_or_else(|| col.list_ids(), |cands| cands);
         // Filter IDs by evaluating on fetched docs lazily
         ids.retain(|id| {
             if let Some(dl) = deadline && std::time::Instant::now() > dl { return false; }
-            col.find_document(id).map(|d| eval_filter(&d.data.0, filter)).unwrap_or(false)
+            col.find_document(id).is_some_and(|d| eval_filter(&d.data.0, filter))
         });
     let skip = opts.skip.unwrap_or(0);
     // Enforce global max result size from telemetry (abuse resistance)
@@ -289,23 +292,20 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
         let end = skip.saturating_add(limit).min(ids.len());
         let sliced: Vec<_> = if skip >= ids.len() { Vec::new() } else { ids[skip..end].to_vec() };
     let dur = start_t.elapsed().as_millis();
-    telemetry::log_query(&col.name_str(), &format!("{:?}", filter_type_name(filter)), dur, opts.limit, opts.skip, None);
+    telemetry::log_query(&col.name_str(), filter_type_name(filter), dur, opts.limit, opts.skip, None);
         return Cursor { collection: col.clone(), ids: sliced, pos: 0, docs: None };
     }
 
     // Otherwise, materialize docs for sorting/projection as before
-    let mut docs: Vec<Document> = if let Some(cands) = plan_index_candidates(col, filter) {
-        cands.into_iter().filter_map(|id| col.find_document(&id)).collect()
-    } else {
-        col.get_all_documents()
-    };
+    let mut docs: Vec<Document> = plan_index_candidates(col, filter)
+        .map_or_else(|| col.get_all_documents(), |cands| cands.into_iter().filter_map(|id| col.find_document(&id)).collect());
     docs.retain(|d| {
         if let Some(dl) = deadline && std::time::Instant::now() > dl { return false; }
         eval_filter(&d.data.0, filter)
     });
     if let Some(specs) = &opts.sort {
-    let limited_specs: Vec<SortSpec> = specs.iter().take(MAX_SORT_FIELDS).cloned().collect();
-    sort_docs(&mut docs, &limited_specs);
+        let limited_specs: Vec<SortSpec> = specs.iter().take(MAX_SORT_FIELDS).cloned().collect();
+        sort_docs(&mut docs, &limited_specs);
     }
     let skip = opts.skip.unwrap_or(0);
     let max_res = telemetry::max_result_limit_for(&col.name_str()).min(MAX_LIMIT);
@@ -316,16 +316,16 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
     if let Some(fields) = &opts.projection {
         let limited_fields: Vec<String> = fields.iter().take(MAX_PROJECTION_FIELDS).cloned().collect();
         for d in &mut projected {
-            d.data.0 = project(&d.data.0, &limited_fields).unwrap_or_else(|| d.data.0.clone());
+            d.data.0 = project(&d.data.0, &limited_fields);
         }
     }
     let ids = projected.iter().map(|d| d.id.clone()).collect();
     let dur = start_t.elapsed().as_millis();
-    telemetry::log_query(&col.name_str(), &format!("{:?}", filter_type_name(filter)), dur, opts.limit, opts.skip, None);
+    telemetry::log_query(&col.name_str(), filter_type_name(filter), dur, opts.limit, opts.skip, None);
     Cursor { collection: col.clone(), ids, pos: 0, docs: Some(projected) }
 }
 
-fn filter_type_name(f: &Filter) -> &'static str {
+const fn filter_type_name(f: &Filter) -> &'static str {
     match f {
         Filter::True => "true",
         Filter::And(_) => "$and",
@@ -343,25 +343,26 @@ fn filter_type_name(f: &Filter) -> &'static str {
 fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<DocumentId>> {
     match filter {
         Filter::Cmp { path, op, value } => {
-            let mut mgr = col.indexes.write();
-            let mut base = match op {
-                CmpOp::Eq => index::lookup_eq(&mut mgr, path, value),
-                CmpOp::Gt => index::lookup_range(&mut mgr, path, Some(value), None, false, false),
-                CmpOp::Gte => index::lookup_range(&mut mgr, path, Some(value), None, true, false),
-                CmpOp::Lt => index::lookup_range(&mut mgr, path, None, Some(value), false, false),
-                CmpOp::Lte => index::lookup_range(&mut mgr, path, None, Some(value), false, true),
+            let mut base = {
+                let mut mgr = col.indexes.write();
+                match op {
+                    CmpOp::Eq => index::lookup_eq(&mut mgr, path, value),
+                    CmpOp::Gt => index::lookup_range(&mut mgr, path, Some(value), None, false, false),
+                    CmpOp::Gte => index::lookup_range(&mut mgr, path, Some(value), None, true, false),
+                    CmpOp::Lt => index::lookup_range(&mut mgr, path, None, Some(value), false, false),
+                    CmpOp::Lte => index::lookup_range(&mut mgr, path, None, Some(value), false, true),
+                }
             };
 
             // Merge overlay deltas from WASP for this collection/field
             let deltas = col.index_deltas();
             if deltas.is_empty() { return base; }
-            use std::collections::HashSet;
-            let mut set: HashSet<DocumentId> = base.take().unwrap_or_default().into_iter().collect();
+            let mut set: std::collections::HashSet<DocumentId> = base.take().unwrap_or_default().into_iter().collect();
             let col_name = col.name_str();
             match op {
                 CmpOp::Eq => {
                     let key_opt = delta_key_from_bson(value);
-                    for d in deltas.iter() {
+                    for d in &deltas {
                         if d.collection == col_name && d.field == *path
                             && let Some(k) = key_opt.as_ref()
                             && delta_key_eq(d.key.clone(), k)
@@ -376,9 +377,9 @@ fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<D
                         CmpOp::Gte => (Some(value), None, true, false),
                         CmpOp::Lt => (None, Some(value), false, false),
                         CmpOp::Lte => (None, Some(value), false, true),
-                        _ => (None, None, false, false),
+                        CmpOp::Eq => unreachable!(),
                     };
-                    for d in deltas.iter() {
+                    for d in &deltas {
                         if d.collection == col_name && d.field == *path
                             && delta_key_in_range(&d.key, min, max, incl_min, incl_max)
                         {
@@ -396,7 +397,7 @@ fn plan_index_candidates(col: &Arc<Collection>, filter: &Filter) -> Option<Vec<D
 fn delta_key_from_bson(v: &Bson) -> Option<DeltaKey> {
     match v {
         Bson::String(s) => Some(DeltaKey::Str(s.clone())),
-        Bson::Int32(i) => Some(DeltaKey::I64(*i as i64)),
+    Bson::Int32(i) => Some(DeltaKey::I64(i64::from(*i))),
         Bson::Int64(i) => Some(DeltaKey::I64(*i)),
         Bson::Double(f) => Some(DeltaKey::F64(*f)),
         Bson::Boolean(b) => Some(DeltaKey::Bool(*b)),
@@ -404,6 +405,7 @@ fn delta_key_from_bson(v: &Bson) -> Option<DeltaKey> {
     }
 }
 
+#[allow(clippy::float_cmp, clippy::cast_precision_loss)]
 fn delta_key_eq(a: DeltaKey, b: &DeltaKey) -> bool {
     use DeltaKey as DK;
     match (a, b) {
@@ -417,17 +419,18 @@ fn delta_key_eq(a: DeltaKey, b: &DeltaKey) -> bool {
     }
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn delta_key_cmp_val(a: &DeltaKey, v: &Bson) -> Option<Ordering> {
     use DeltaKey as DK;
     match (a, v) {
         (DK::Str(x), Bson::String(y)) => Some(x.cmp(y)),
         (DK::Bool(x), Bson::Boolean(y)) => Some(x.cmp(y)),
-    (DK::I64(x), Bson::Int32(y)) => Some((*x).cmp(&(*y as i64))),
+    (DK::I64(x), Bson::Int32(y)) => Some((*x).cmp(&i64::from(*y))),
         (DK::I64(x), Bson::Int64(y)) => Some(x.cmp(y)),
         (DK::I64(x), Bson::Double(y)) => (*x as f64).partial_cmp(y),
         (DK::F64(x), Bson::Double(y)) => x.partial_cmp(y),
-        (DK::F64(x), Bson::Int32(y)) => x.partial_cmp(&(*y as f64)),
-        (DK::F64(x), Bson::Int64(y)) => x.partial_cmp(&(*y as f64)),
+    (DK::F64(x), Bson::Int32(y)) => x.partial_cmp(&f64::from(*y)),
+    (DK::F64(x), Bson::Int64(y)) => x.partial_cmp(&(*y as f64)),
         _ => None,
     }
 }
@@ -448,14 +451,16 @@ fn delta_key_in_range(key: &DeltaKey, min: Option<&Bson>, max: Option<&Bson>, in
 
 pub fn count_docs(col: &Arc<Collection>, filter: &Filter) -> usize {
     let _ = telemetry::try_consume_token(&col.name_str(), 1);
-    if let Some(cands) = plan_index_candidates(col, filter) {
-        cands.into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count()
-    } else {
-    col.list_ids().into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count()
-    }
+    plan_index_candidates(col, filter).map_or_else(
+        || col.list_ids().into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count(),
+        |cands| cands.into_iter().filter_map(|id| col.find_document(&id)).filter(|d| eval_filter(&d.data.0, filter)).count(),
+    )
 }
 
 /// Rate-limit aware variants returning explicit errors instead of partial results.
+///
+/// # Errors
+/// Returns `DbError::RateLimitedWithRetry` when the per-collection token bucket would be exceeded.
 pub fn find_docs_rate_limited(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> Result<Cursor, DbError> {
     if telemetry::would_limit(&col.name_str(), 1) {
         telemetry::log_rate_limited(&col.name_str(), "find");
@@ -465,6 +470,8 @@ pub fn find_docs_rate_limited(col: &Arc<Collection>, filter: &Filter, opts: &Fin
     Ok(find_docs(col, filter, opts))
 }
 
+/// # Errors
+/// Returns `DbError::RateLimitedWithRetry` when the per-collection token bucket would be exceeded.
 pub fn count_docs_rate_limited(col: &Arc<Collection>, filter: &Filter) -> Result<usize, DbError> {
     if telemetry::would_limit(&col.name_str(), 1) {
         telemetry::log_rate_limited(&col.name_str(), "count");
@@ -474,6 +481,7 @@ pub fn count_docs_rate_limited(col: &Arc<Collection>, filter: &Filter) -> Result
     Ok(count_docs(col, filter))
 }
 
+#[must_use]
 pub fn eval_filter(doc: &BsonDocument, f: &Filter) -> bool {
     match f {
         Filter::True => true,
@@ -481,23 +489,17 @@ pub fn eval_filter(doc: &BsonDocument, f: &Filter) -> bool {
         Filter::Or(v) => v.iter().any(|x| eval_filter(doc, x)),
         Filter::Not(b) => !eval_filter(doc, b),
         Filter::Exists { path, exists } => get_path(doc, path).is_some() == *exists,
-        Filter::In { path, values } => {
-            if let Some(v) = get_path(doc, path) {
-                values.iter().take(MAX_IN_SET).any(|x| bson_equal(v, x))
-            } else { false }
-        }
-        Filter::Nin { path, values } => {
-            if let Some(v) = get_path(doc, path) {
-                values.iter().take(MAX_IN_SET).all(|x| !bson_equal(v, x))
-            } else { true }
-        }
+        Filter::In { path, values } => get_path(doc, path)
+            .is_some_and(|v| values.iter().take(MAX_IN_SET).any(|x| bson_equal(v, x))),
+        Filter::Nin { path, values } => get_path(doc, path)
+            .is_none_or(|v| values.iter().take(MAX_IN_SET).all(|x| !bson_equal(v, x))),
         Filter::Cmp { path, op, value } => {
             match (get_path(doc, path), op) {
                 (Some(v), CmpOp::Eq) => bson_equal(v, value),
-                (Some(v), CmpOp::Gt) => bson_cmp(v, value).map(|o| o == std::cmp::Ordering::Greater).unwrap_or(false),
-                (Some(v), CmpOp::Gte) => bson_cmp(v, value).map(|o| o != std::cmp::Ordering::Less).unwrap_or(false),
-                (Some(v), CmpOp::Lt) => bson_cmp(v, value).map(|o| o == std::cmp::Ordering::Less).unwrap_or(false),
-                (Some(v), CmpOp::Lte) => bson_cmp(v, value).map(|o| o != std::cmp::Ordering::Greater).unwrap_or(false),
+                (Some(v), CmpOp::Gt) => bson_cmp(v, value).is_some_and(|o| o == std::cmp::Ordering::Greater),
+                (Some(v), CmpOp::Gte) => bson_cmp(v, value).is_some_and(|o| o != std::cmp::Ordering::Less),
+                (Some(v), CmpOp::Lt) => bson_cmp(v, value).is_some_and(|o| o == std::cmp::Ordering::Less),
+                (Some(v), CmpOp::Lte) => bson_cmp(v, value).is_some_and(|o| o != std::cmp::Ordering::Greater),
                 _ => false,
             }
         }
@@ -533,16 +535,28 @@ fn get_path<'a>(doc: &'a BsonDocument, path: &str) -> Option<&'a Bson> {
     cur
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn to_f64(b: &Bson) -> Option<f64> {
     match b {
-        Bson::Int32(i) => Some(*i as f64),
-        Bson::Int64(i) => Some(*i as f64),
+    Bson::Int32(i) => Some(f64::from(*i)),
+    Bson::Int64(i) => Some(*i as f64),
         Bson::Double(f) => Some(*f),
         _ => None,
     }
 }
 
-fn bson_equal(a: &Bson, b: &Bson) -> bool { match (a, b) { (Bson::Int32(x), Bson::Int64(y)) => *x as i64 == *y, (Bson::Int64(x), Bson::Int32(y)) => *x == *y as i64, (Bson::Int32(x), Bson::Double(y)) => (*x as f64) == *y, (Bson::Double(x), Bson::Int32(y)) => *x == (*y as f64), (Bson::Int64(x), Bson::Double(y)) => (*x as f64) == *y, (Bson::Double(x), Bson::Int64(y)) => *x == (*y as f64), _ => a == b } }
+#[allow(clippy::float_cmp, clippy::cast_precision_loss)]
+fn bson_equal(a: &Bson, b: &Bson) -> bool {
+    match (a, b) {
+        (Bson::Int32(x), Bson::Int64(y)) => i64::from(*x) == *y,
+        (Bson::Int64(x), Bson::Int32(y)) => *x == i64::from(*y),
+        (Bson::Int32(x), Bson::Double(y)) => f64::from(*x) == *y,
+        (Bson::Double(x), Bson::Int32(y)) => *x == f64::from(*y),
+        (Bson::Int64(x), Bson::Double(y)) => (*x as f64) == *y,
+        (Bson::Double(x), Bson::Int64(y)) => *x == (*y as f64),
+        _ => a == b,
+    }
+}
 
 fn bson_cmp(a: &Bson, b: &Bson) -> Option<Ordering> {
     if let (Some(af), Some(bf)) = (to_f64(a), to_f64(b)) { return af.partial_cmp(&bf); }
@@ -553,19 +567,20 @@ fn bson_cmp(a: &Bson, b: &Bson) -> Option<Ordering> {
     }
 }
 
-fn project(doc: &BsonDocument, fields: &Vec<String>) -> Option<BsonDocument> {
+#[must_use]
+fn project(doc: &BsonDocument, fields: &[String]) -> BsonDocument {
     let mut out = BsonDocument::new();
     for f in fields {
         if let Some(v) = get_path(doc, f) { out.insert(f.clone(), v.clone()); }
     }
-    Some(out)
+    out
 }
 
-fn sort_docs(docs: &mut [Document], specs: &Vec<SortSpec>) {
+fn sort_docs(docs: &mut [Document], specs: &[SortSpec]) {
     docs.sort_by(|a, b| compare_docs(&a.data.0, &b.data.0, specs));
 }
 
-fn compare_docs(a: &BsonDocument, b: &BsonDocument, specs: &Vec<SortSpec>) -> Ordering {
+fn compare_docs(a: &BsonDocument, b: &BsonDocument, specs: &[SortSpec]) -> Ordering {
     for s in specs {
         let av = get_path(a, &s.field);
         let bv = get_path(b, &s.field);
@@ -595,28 +610,25 @@ fn set_path(doc: &mut BsonDocument, path: &str, val: Bson) -> bool {
     if parts.is_empty() { return false; }
     let mut cur = doc;
     for key in parts.iter().take(parts.len() - 1) {
-        let key = key.to_string();
-        let need_new = match cur.get_mut(&key) {
-            Some(Bson::Document(_)) => false,
-            Some(_) => true,
-            None => true,
-        };
+        let key_str: &str = key;
+        let need_new = !matches!(cur.get(key_str), Some(Bson::Document(_)));
         if need_new {
-            cur.insert(key.clone(), Bson::Document(BsonDocument::new()));
+            cur.insert(key_str.to_string(), Bson::Document(BsonDocument::new()));
         }
-    if let Some(Bson::Document(d)) = cur.get_mut(&key) { cur = d; } else { return false; }
+        if let Some(Bson::Document(d)) = cur.get_mut(key_str) { cur = d; } else { return false; }
     }
-    let last = match parts.last() { Some(l) => l, None => return false };
+    let Some(last) = parts.last() else { return false };
     let prev = cur.get(*last).cloned();
-    let changed = match prev.as_ref() { Some(p) => !bson_equal(p, &val), None => true };
+    let changed = prev.as_ref().is_none_or(|p| !bson_equal(p, &val));
     cur.insert((*last).to_string(), val);
     changed
 }
 
+#[allow(clippy::cast_precision_loss)]
 fn inc_path(doc: &mut BsonDocument, path: &str, delta: f64) -> bool {
     let cur_val = get_path(doc, path).cloned();
     let new_val = match cur_val {
-        Some(Bson::Int32(i)) => Bson::Double(i as f64 + delta),
+    Some(Bson::Int32(i)) => Bson::Double(f64::from(i) + delta),
         Some(Bson::Int64(i)) => Bson::Double(i as f64 + delta),
         Some(Bson::Double(f)) => Bson::Double(f + delta),
         None => Bson::Double(delta),
@@ -633,6 +645,6 @@ fn unset_path(doc: &mut BsonDocument, path: &str) -> bool {
         let key = *key;
         match cur.get_mut(key) { Some(Bson::Document(d)) => { cur = d; }, _ => return false }
     }
-    let last = match parts.last() { Some(l) => l, None => return false };
+    let Some(last) = parts.last() else { return false };
     cur.remove(*last).is_some()
 }

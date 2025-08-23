@@ -42,6 +42,8 @@ impl Database {
     /// - If `name_or_path` is Some and non-empty, it is used (extension defaults to .db if missing).
     /// - If None or empty, defaults to `nexuslite.db` in the current directory.
     ///   This ensures the main `.db` file exists and also creates the `.wasp` file if missing.
+    /// # Errors
+    /// Returns an error if creating or initializing the database fails.
     pub fn new(name_or_path: Option<&str>) -> Result<Self, DbError> {
     let db_path_buf = crate::fsutil::normalize_db_path(name_or_path);
         let db_path = db_path_buf.as_path();
@@ -50,7 +52,7 @@ impl Database {
         // Create the main database file if it doesn't exist
         if !db_path.exists() {
             let _ = crate::fsutil::create_secure(db_path)
-                .map_err(|e| DbError::Io(format!("Failed to create database file: {}", e)))?;
+                .map_err(|e| DbError::Io(format!("Failed to create database file: {e}")))?;
         }
         // Create the WASP file if it doesn't exist
         if !wasp_path.exists() {
@@ -95,7 +97,10 @@ impl Database {
     ///
     /// The main database is stored at `{filepath}` and the WASP engine state at `{filepath}.wasp`.
     /// If the main `.db` file does not exist, returns `DbError::DatabaseNotFound`.
-    /// If the DB file doesn't exist, returns DbError::DatabaseNotFound.
+    /// If the DB file doesn't exist, returns `DbError::DatabaseNotFound`.
+    ///
+    /// # Errors
+    /// Returns an error if opening or initializing the database fails.
     pub fn open(name_or_path: &str) -> Result<Self, DbError> {
     let db_path_buf = crate::fsutil::normalize_db_path(Some(name_or_path));
         let db_path = db_path_buf.as_path();
@@ -150,23 +155,29 @@ impl Database {
     }
 
     /// Inserts a document into the specified collection.
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn insert_document(&self, collection_name: &str, document: Document) -> Result<DocumentId, DbError> {
         let collection = self.engine.get_collection(collection_name)
-            .ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+            .ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(collection.insert_document(document))
     }
 
     /// Updates a document in the specified collection.
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn update_document(&self, collection_name: &str, document_id: &DocumentId, new_document: Document) -> Result<bool, DbError> {
         let collection = self.engine.get_collection(collection_name)
-            .ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+            .ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(collection.update_document(document_id, new_document))
     }
 
     /// Deletes a document from the specified collection by its ID.
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn delete_document(&self, collection_name: &str, document_id: &DocumentId) -> Result<bool, DbError> {
         let collection = self.engine.get_collection(collection_name)
-            .ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+            .ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(collection.delete_document(document_id))
     }
 
@@ -181,46 +192,63 @@ impl Database {
     }
 
     // --- Query API (façade over query module) ---
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn find(&self, collection_name: &str, filter: &crate::query::Filter, opts: &crate::query::FindOptions) -> Result<crate::query::Cursor, DbError> {
-        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        let col = self.engine.get_collection(collection_name).ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(crate::query::find_docs(&col, filter, opts))
     }
 
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn count(&self, collection_name: &str, filter: &crate::query::Filter) -> Result<usize, DbError> {
-        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        let col = self.engine.get_collection(collection_name).ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(crate::query::count_docs(&col, filter))
     }
 
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn update_many(&self, collection_name: &str, filter: &crate::query::Filter, update: &crate::query::UpdateDoc) -> Result<crate::query::UpdateReport, DbError> {
-        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        let col = self.engine.get_collection(collection_name).ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(crate::query::update_many(&col, filter, update))
     }
 
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn update_one(&self, collection_name: &str, filter: &crate::query::Filter, update: &crate::query::UpdateDoc) -> Result<crate::query::UpdateReport, DbError> {
-        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        let col = self.engine.get_collection(collection_name).ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(crate::query::update_one(&col, filter, update))
     }
 
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn delete_many(&self, collection_name: &str, filter: &crate::query::Filter) -> Result<crate::query::DeleteReport, DbError> {
-        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        let col = self.engine.get_collection(collection_name).ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(crate::query::delete_many(&col, filter))
     }
 
+    /// # Errors
+    /// Returns an error if the collection doesn't exist.
     pub fn delete_one(&self, collection_name: &str, filter: &crate::query::Filter) -> Result<crate::query::DeleteReport, DbError> {
-        let col = self.engine.get_collection(collection_name).ok_or(DbError::NoSuchCollection(collection_name.to_string()))?;
+        let col = self.engine.get_collection(collection_name).ok_or_else(|| DbError::NoSuchCollection(collection_name.to_string()))?;
         Ok(crate::query::delete_one(&col, filter))
     }
 
     /// Checkpoint: write a snapshot embedding index descriptors into the main `.db` file, then truncate `.wasp`
+    /// # Errors
+    /// Returns an error if persisting the snapshot fails.
     pub fn checkpoint(&self, filepath: &Path) -> Result<(), DbError> {
         self.engine.checkpoint_with_indexes(filepath).map_err(|e| DbError::Io(e.to_string()))
     }
 
     /// Returns the logical database name.
+    #[must_use]
     pub fn name(&self) -> &str { &self.name }
 
     /// Closes an open database handle by path (optional). If not found, returns DatabaseNotFound.
     /// This removes the handle from the internal registry; resources are dropped when no longer referenced.
+    /// # Errors
+    /// Returns an error if the database handle cannot be found.
     pub fn close(name_or_path: Option<&str>) -> Result<(), DbError> {
     let db_path = crate::fsutil::normalize_db_path(name_or_path);
         if unregister_db(&db_path) { Ok(()) } else { Err(DbError::DatabaseNotFound) }
@@ -231,6 +259,8 @@ impl Database {
 ///
 /// This function should be called before any other database operations.
 /// It sets up the logger and other necessary components.
+/// # Errors
+/// Returns an error if the logger cannot be initialized.
 pub fn init() -> Result<(), Box<dyn std::error::Error>> {
     logger::init()?;
     Ok(())

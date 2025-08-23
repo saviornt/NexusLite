@@ -159,6 +159,21 @@ To enable optional regex support in queries, build with the feature flag:
 cargo test --features regex -- --nocapture
 ```
 
+## Security and supply chain
+
+- Unsafe Rust is forbidden in this crate (`#![forbid(unsafe_code)]`).
+- CI runs dependency advisories and policy checks (cargo-audit and cargo-deny) using the repo’s `deny.toml`.
+- Locally, you can run static checks and tests:
+  - Clippy: `cargo clippy -q --all-targets --all-features -- -D warnings`
+  - Tests: `cargo test --all --quiet`
+  - Optional (if installed): `cargo audit` and `cargo deny check`
+
+Cargo-deny config highlights:
+
+- Advisories: yanked=deny; unmaintained=workspace; RUSTSEC-2024-0388 ignored (transitive via log4rs).
+- Licenses: strict allowlist (Apache-2.0, MIT, BSD-2/3, ISC, Unicode-DFS-2016), plus Unicode-3.0 and Zlib for transitive crates; private workspace crates ignored.
+- Sources: only crates.io allowed; unknown git/registries denied by default.
+
 ## CLI and REPL
 
 The `nexuslite` binary offers admin and query commands plus an interactive shell.

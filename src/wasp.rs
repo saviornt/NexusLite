@@ -1,3 +1,12 @@
+#![allow(
+	clippy::missing_errors_doc,
+	clippy::struct_excessive_bools,
+	clippy::cast_possible_truncation,
+	clippy::cast_precision_loss,
+	clippy::cast_sign_loss,
+	clippy::suboptimal_flops,
+	clippy::needless_pass_by_value
+)]
 // Simple Bloom filter used for quick negative membership tests in segment lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BloomFilter {
@@ -470,11 +479,13 @@ pub enum CowNode {
 }
 
 impl CowNode {
-	pub fn new_leaf() -> Self {
-		CowNode::Leaf { keys: vec![], values: vec![] }
+	#[must_use]
+	pub const fn new_leaf() -> Self {
+		Self::Leaf { keys: vec![], values: vec![] }
 	}
-	pub fn new_internal() -> Self {
-		CowNode::Internal { keys: vec![], children: vec![] }
+	#[must_use]
+	pub const fn new_internal() -> Self {
+		Self::Internal { keys: vec![], children: vec![] }
 	}
 }
 
@@ -486,6 +497,8 @@ pub struct CowTree {
 }
 
 impl CowTree {
+	/// # Errors
+	/// Returns an error if manifest or page IO/serialization fails.
 	pub fn new(mut file: WaspFile) -> io::Result<Self> {
 		// Try to read manifest, else create new
 		let mut manifest = file.read_manifest().unwrap_or_else(|_| Manifest::new());
@@ -500,7 +513,7 @@ impl CowTree {
 			let new_root = alloc.alloc();
 			let page = Page::new(new_root, version + 1, 2, node_bytes);
 			// Use temp tree to write
-			let mut temp_tree = CowTree { root_page_id: new_root, file, version, alloc };
+			let mut temp_tree = Self { root_page_id: new_root, file, version, alloc };
 			temp_tree.write_page(new_root, &page)?;
 			temp_tree.version += 1;
 			manifest.root_page_id = new_root;
@@ -510,10 +523,12 @@ impl CowTree {
 			// move back
 			file = temp_tree.file; version = temp_tree.version; root_page_id = new_root; alloc = temp_tree.alloc;
 		}
-		Ok(CowTree { root_page_id, file, version, alloc })
+		Ok(Self { root_page_id, file, version, alloc })
 	}
 
 	// Insert a key/value (for now, just create a new root leaf if empty)
+	/// # Errors
+	/// Returns an error if reading/writing pages fails or serialization fails.
 	pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> io::Result<()> {
 		const MAX_KEYS: usize = 32;
 		// Recursive insert, returns (new_page_id, promoted_key)
@@ -569,7 +584,7 @@ impl CowTree {
 							let mid = keys.len() / 2;
 							let right_keys = keys.split_off(mid + 1);
 							let right_children = children.split_off(mid + 1);
-							let promoted = match keys.pop() { Some(k) => k, None => return Err(io::Error::other("internal split with empty keys")) };
+							let Some(promoted) = keys.pop() else { return Err(io::Error::other("internal split with empty keys")) };
 							let right = CowNode::Internal { keys: right_keys, children: right_children };
 							let new_right_id = tree.alloc.alloc();
 							let right_bytes = encode_to_vec(&right, standard())
@@ -615,10 +630,8 @@ impl CowTree {
 			self.write_page(root_page_id, &page)?;
 			self.root_page_id = root_page_id;
 			self.version += 1;
-		} else {
-			self.root_page_id = new_root_id;
-			self.version += 1;
-		}
+	} else { self.root_page_id = new_root_id; }
+	self.version += 1;
 		manifest.root_page_id = self.root_page_id;
 		manifest.version = self.version;
 		self.alloc.export_to_manifest(&mut manifest);
@@ -626,14 +639,15 @@ impl CowTree {
 		Ok(())
 	}
 
+	/// # Errors
+	/// Returns an error if reading or decoding a page fails.
 	pub fn get(&mut self, key: &[u8]) -> io::Result<Option<Vec<u8>>> {
 		if self.root_page_id == 0 { return Ok(None); }
 		let mut cur = self.root_page_id;
 		loop {
 			let page = self.read_page(cur)?;
 			let node = decode_from_slice::<CowNode, _>(&page.data, standard())
-				.map(|(n, _)| n)
-				.unwrap_or_else(|_| CowNode::new_leaf());
+				.map_or_else(|_| CowNode::new_leaf(), |(n, _)| n);
 			match node {
 				CowNode::Leaf { keys, values } => {
 					match keys.binary_search_by(|k| k.as_slice().cmp(key)) {
@@ -705,8 +719,9 @@ pub struct PageHeader {
 }
 
 impl PageHeader {
-	pub fn new(page_id: u64, version: u64, page_type: u8, data_len: u32) -> Self {
-		PageHeader {
+	#[must_use]
+	pub const fn new(page_id: u64, version: u64, page_type: u8, data_len: u32) -> Self {
+		Self {
 			page_id,
 			version,
 			page_type,
@@ -725,15 +740,17 @@ pub struct Page {
 }
 
 impl Page {
+	#[must_use]
 	pub fn new(page_id: u64, version: u64, page_type: u8, data: Vec<u8>) -> Self {
 		let mut header = PageHeader::new(page_id, version, page_type, data.len() as u32);
 		let mut hasher = Crc32Hasher::new();
 	if let Ok(hdr_bytes) = encode_to_vec(header, standard()) { hasher.update(&hdr_bytes); }
 		hasher.update(&data);
 		header.crc32 = hasher.finalize();
-		Page { header, data }
+		Self { header, data }
 	}
 
+	#[must_use]
 	pub fn verify_crc(&self) -> bool {
 		let mut header = self.header;
 		let crc_orig = header.crc32;
@@ -747,9 +764,12 @@ impl Page {
 
 // Manifest serialization/deserialization
 impl Manifest {
+	#[must_use]
 	pub fn to_bytes(&self) -> Vec<u8> {
 	encode_to_vec(self, standard()).unwrap_or_default()
 	}
+	/// # Errors
+	/// Returns an error if deserialization fails.
 	pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
 		decode_from_slice::<Self, _>(bytes, standard())
 			.map(|(m, _)| m)
@@ -765,6 +785,8 @@ pub struct WaspFile {
 }
 
 impl WaspFile {
+	/// # Errors
+	/// Returns an error if the file cannot be opened or initialized.
 	pub fn open(path: PathBuf) -> io::Result<Self> {
 		// Do not truncate on open; preserve existing data. Be explicit to satisfy clippy.
 		let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
@@ -787,7 +809,7 @@ impl WaspFile {
 			file.write_all(&page_bytes)?;
 			file.sync_data()?;
 		}
-		Ok(WaspFile {
+	Ok(Self {
 			file,
 			manifest_offsets,
 			manifest_version: 0,
@@ -795,6 +817,8 @@ impl WaspFile {
 	}
 
 	// Write manifest to the next buffer slot (flip)
+	/// # Errors
+	/// Returns an error if writing the manifest fails.
 	pub fn write_manifest(&mut self, manifest: &Manifest) -> io::Result<()> {
 		let next_slot = (self.manifest_version as usize + 1) % 2;
 		let offset = self.manifest_offsets[next_slot];
@@ -810,6 +834,8 @@ impl WaspFile {
 	}
 
 	// Read the latest valid manifest (check both slots)
+	/// # Errors
+	/// Returns an error if reading or decoding the manifest fails.
 	pub fn read_manifest(&mut self) -> io::Result<Manifest> {
 		let mut best: Option<(u64, Manifest)> = None;
 		for &offset in &self.manifest_offsets {
@@ -819,7 +845,7 @@ impl WaspFile {
 			let (page, _): (Page, _) = decode_from_slice(&buf, standard()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 			if page.header.page_type == 1 && page.verify_crc()
 				&& let Ok(manifest) = Manifest::from_bytes(&page.data)
-				&& best.as_ref().map(|(v, _)| manifest.version > *v).unwrap_or(true) {
+				&& best.as_ref().is_none_or(|(v, _)| manifest.version > *v) {
 				best = Some((manifest.version, manifest));
 			}
 		}
@@ -851,7 +877,7 @@ pub struct BlockAllocator {
 
 impl BlockAllocator {
 	#[must_use]
-	pub fn new() -> Self {
+	pub const fn new() -> Self {
 		Self { free_pages: BTreeSet::new(), next_page: 1 }
 	}
 	/// Construct allocator from persisted manifest allocator fields
@@ -1059,18 +1085,23 @@ pub struct SnapshotFile {
 }
 
 impl SnapshotFile {
-	pub fn new(snapshot: DbSnapshot) -> Self {
-		SnapshotFile { magic: SNAPSHOT_MAGIC, version: SNAPSHOT_CURRENT_VERSION, snapshot }
+	#[must_use]
+	pub const fn new(snapshot: DbSnapshot) -> Self {
+		Self { magic: SNAPSHOT_MAGIC, version: SNAPSHOT_CURRENT_VERSION, snapshot }
 	}
 }
 
 /// Encode a snapshot file with magic+version header.
+/// # Errors
+/// Returns an error if encoding fails.
 pub fn encode_snapshot_file(snap: &DbSnapshot) -> io::Result<Vec<u8>> {
 	let file = SnapshotFile::new(snap.clone());
 	encode_to_vec(&file, standard()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Decode a snapshot from bytes, supporting both wrapped and legacy formats.
+/// # Errors
+/// Returns an error if decoding fails or the format is unsupported.
 pub fn decode_snapshot_from_bytes(bytes: &[u8]) -> io::Result<DbSnapshot> {
 	// Require magic header
 	if bytes.len() < 4 || bytes[0..4] != SNAPSHOT_MAGIC {

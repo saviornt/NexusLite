@@ -10,7 +10,7 @@ use crate::document::Document;
 pub struct DocumentId(pub Uuid);
 
 impl DocumentId {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
 }
@@ -38,12 +38,12 @@ impl<'de> Deserialize<'de> for SerializableBsonDocument {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let bytes: Vec<u8> = <Vec<u8>>::deserialize(deserializer)?;
         let doc = bson::from_slice(&bytes).map_err(serde::de::Error::custom)?;
-        Ok(SerializableBsonDocument(doc))
+    Ok(Self(doc))
     }
 }
 
 /// A wrapper for `chrono::DateTime<Utc>` that implements `Encode` and `Decode`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SerializableDateTime(pub DateTime<Utc>);
 
 impl Serialize for SerializableDateTime {
@@ -58,7 +58,7 @@ impl<'de> Deserialize<'de> for SerializableDateTime {
         let dt = DateTime::parse_from_rfc3339(&s)
             .map_err(serde::de::Error::custom)?
             .with_timezone(&Utc);
-        Ok(SerializableDateTime(dt))
+    Ok(Self(dt))
     }
 }
 
@@ -69,8 +69,9 @@ pub struct CacheEntry {
 }
 
 impl CacheEntry {
+    #[must_use]
     pub fn new(document: Document) -> Self {
-        CacheEntry {
+        Self {
             document,
             lru_timestamp: Instant::now(),
         }

@@ -78,14 +78,14 @@ fn scan_toml_for_secret_keys(val: &toml::Value) -> Vec<String> {
         match v {
             toml::Value::Table(map) => {
                 for (k, vv) in map {
-                    let full = if prefix.is_empty() { k.clone() } else { format!("{}.{k}", prefix) };
+                    let full = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
                     if is_secret_key(k) { secrets.push(full.clone()); }
                     q.push_back((full, vv));
                 }
             }
             toml::Value::Array(arr) => {
                 for (i, vv) in arr.iter().enumerate() {
-                    q.push_back((format!("{}[{}]", prefix, i), vv));
+                    q.push_back((format!("{prefix}[{i}]"), vv));
                 }
             }
             _ => {}
@@ -397,23 +397,28 @@ enum Commands {
     FeaturesCheck,
 }
 
-fn ensure_engine(db_override: &Option<PathBuf>, cfg: &AppConfig) -> Result<Engine, Box<dyn std::error::Error>> {
+fn ensure_engine(db_override: Option<&PathBuf>, cfg: &AppConfig) -> Result<Engine, Box<dyn std::error::Error>> {
     // Use WASP-backed engine by default when a db was specified; else fallback to WAL-in-temp for quick usage
-    if let Some(db) = db_override.as_ref().or(cfg.db_path.as_ref()) {
-        let wasp = db.with_extension("wasp");
-        Engine::with_wasp(wasp)
-    } else {
-        let tmp = std::env::temp_dir().join("nexuslite_cli_wal.log");
-        Engine::new(tmp)
-    }
+    db_override
+        .or(cfg.db_path.as_ref())
+        .map_or_else(
+            || {
+                let tmp = std::env::temp_dir().join("nexuslite_cli_wal.log");
+                Engine::new(tmp)
+            },
+            |db| {
+                let wasp = db.with_extension("wasp");
+                Engine::with_wasp(wasp)
+            },
+        )
 }
 
 fn main() {
     let cli = Cli::parse();
     let cfg = load_config(cli.config.clone());
-    let engine = match ensure_engine(&cli.db, &cfg) {
+    let engine = match ensure_engine(cli.db.as_ref(), &cfg) {
         Ok(e) => e,
-        Err(e) => { eprintln!("error: {}", e); std::process::exit(1); }
+        Err(e) => { eprintln!("error: {e}"); std::process::exit(1); }
     };
     let def_col = cfg.default_collection.clone();
 
@@ -470,8 +475,8 @@ fn main() {
             res
         },
     Commands::FeatureList => prog_cli::run(&engine, prog_cli::Command::FeatureList),
-    Commands::FeatureEnable { name } => prog_cli::run(&engine, prog_cli::Command::FeatureEnable { name: name.clone() }),
-    Commands::FeatureDisable { name } => prog_cli::run(&engine, prog_cli::Command::FeatureDisable { name: name.clone() }),
+    Commands::FeatureEnable { name } => prog_cli::run(&engine, prog_cli::Command::FeatureEnable { name }),
+    Commands::FeatureDisable { name } => prog_cli::run(&engine, prog_cli::Command::FeatureDisable { name }),
     Commands::FeaturesPrint => prog_cli::run(&engine, prog_cli::Command::FeaturesPrint),
     Commands::FeaturesCheck => prog_cli::run(&engine, prog_cli::Command::FeaturesCheck),
         Commands::CloseDb { path } => prog_cli::run(&engine, prog_cli::Command::DbClose { db_path: path }),
@@ -504,11 +509,11 @@ fn main() {
             prog_cli::run(&engine, prog_cli::Command::QueryDelete { collection: c, filter_json: filter })
         }
         Commands::UpdateOne { collection, filter, update } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::QueryUpdateOne { collection: c, filter_json: filter, update_json: update })
         }
         Commands::DeleteOne { collection, filter } => {
-            let c = collection.or(def_col.clone()).unwrap_or_else(|| "default".into());
+            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::QueryDeleteOne { collection: c, filter_json: filter })
         }
         Commands::CreateDocument { collection, json, ephemeral, ttl, stdin } => {
@@ -562,14 +567,10 @@ fn main() {
                     println!("{}: docs={}, ephemeral={}, persistent={}, hits={}, misses={}", n, docs.len(), eph, per, m.hits, m.misses);
                 }
             }
-            eprintln!("totals: ephemeral={}, persistent={}", ephemeral_total, persistent_total);
+            eprintln!("totals: ephemeral={ephemeral_total}, persistent={persistent_total}");
             // Show compiled features and runtime flags
             let report = nexus_lite::api::info(&engine);
-            if !report.compiled_features.is_empty() {
-                println!("compiled_features: {}", report.compiled_features.join(","));
-            } else {
-                println!("compiled_features: <none>");
-            }
+            if report.compiled_features.is_empty() { println!("compiled_features: <none>"); } else { println!("compiled_features: {}", report.compiled_features.join(",")); }
             if !report.runtime_flags.is_empty() {
                 println!("runtime_flags:");
                 for f in report.runtime_flags { println!("  {}\tenabled={}\t{}", f.name, f.enabled, f.description); }
@@ -618,7 +619,7 @@ fn main() {
             if !env_secret_keys.is_empty() {
                 env_secret_keys.sort();
                 println!("env_secrets: {} entries (values REDACTED)", env_secret_keys.len());
-                for k in env_secret_keys { println!("env:{}=REDACTED", k); }
+                for k in env_secret_keys { println!("env:{k}=REDACTED"); }
                 // Summary status for environments with secrets
                 println!("status:warning");
             }
@@ -659,11 +660,11 @@ fn main() {
                         .replace("token", "***REDACTED***")
                         .replace("api_key", "***REDACTED***")
                         .replace("apikey", "***REDACTED***");
-                    println!("{}", redacted);
+                    println!("{redacted}");
                     continue;
                 }
                 if trimmed.eq_ignore_ascii_case("list-collections") {
-                    for n in engine.list_collection_names() { println!("{}", n); }
+                    for n in engine.list_collection_names() { println!("{n}"); }
                     continue;
                 }
                 if trimmed.eq_ignore_ascii_case("list-ephemeral") {
@@ -719,7 +720,7 @@ fn main() {
                         continue;
                     }
                 }
-                println!("unrecognized: {}", trimmed);
+                println!("unrecognized: {trimmed}");
             }
             Ok(())
         }
@@ -729,17 +730,17 @@ fn main() {
         if let Some(db) = e.downcast_ref::<nexus_lite::errors::DbError>() {
             match db {
                 nexus_lite::errors::DbError::RateLimitedWithRetry { retry_after_ms } => {
-                    eprintln!("rate-limited; retry-after-ms={}", retry_after_ms);
+                    eprintln!("rate-limited; retry-after-ms={retry_after_ms}");
                     std::process::exit(2);
                 }
                 nexus_lite::errors::DbError::RateLimited => {
                     eprintln!("rate-limited");
                     std::process::exit(2);
                 }
-                _ => { eprintln!("error: {}", db); std::process::exit(1); }
+                _ => { eprintln!("error: {db}"); std::process::exit(1); }
             }
         } else {
-            eprintln!("error: {}", e);
+            eprintln!("error: {e}");
             std::process::exit(1);
         }
     }

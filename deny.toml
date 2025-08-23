@@ -1,11 +1,22 @@
 [advisories]
-denylists = ["unmaintained", "yanked", "notice", "unsound"]
-denies = ["vulnerability"]
+# Config version for cargo-deny (kept for compatibility)
+version = 2
+
+# Yanked versions policy: deny by default
+yanked = "deny"
+
+# Unmaintained advisories policy: fail only if a direct workspace dependency is unmaintained
+# (values: "all" | "workspace" | "transitive" | "none")
+unmaintained = "workspace"
+
+# Ignore specific advisories or yanked crate versions
+# - derivative crate (transitive via log4rs) is currently unmaintained: RUSTSEC-2024-0388
+ignore = [
+  "RUSTSEC-2024-0388",
+]
 
 [bans]
-deny = [
-  # Example: { name = "some-crate", version = "*" }
-]
+deny = []
 
 [licenses]
 # Allow OSI-approved licenses
@@ -15,8 +26,17 @@ allow = [
   "BSD-3-Clause",
   "BSD-2-Clause",
   "ISC",
-  "Unicode-DFS-2016"
+  "Unicode-DFS-2016",
+  "Unicode-3.0",
+  "Zlib",
 ]
 
+# Ignore license check for private workspace crates
+private = { ignore = true }
+
 [sources]
-allow-git = false
+# Only allow crates.io registry and no git sources by default
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

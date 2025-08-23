@@ -4,13 +4,13 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentType {
     Persistent,
     Ephemeral,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Metadata {
     pub created_at: SerializableDateTime,
     pub updated_at: SerializableDateTime,
@@ -19,6 +19,7 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    #[must_use]
     pub fn new(document_type: DocumentType) -> Self {
         Self {
             created_at: SerializableDateTime(Utc::now()),
@@ -37,6 +38,7 @@ pub struct Document {
 }
 
 impl Document {
+    #[must_use]
     pub fn new(data: BsonDocument, document_type: DocumentType) -> Self {
         Self {
             id: DocumentId::new(),
@@ -51,20 +53,16 @@ impl Document {
         }
     }
 
-    pub fn get_ttl(&self) -> Option<Duration> {
+    pub const fn get_ttl(&self) -> Option<Duration> {
         self.metadata.ttl
     }
 
+    #[must_use]
     pub fn is_expired(&self) -> bool {
-        if let Some(ttl) = self.metadata.ttl {
+        self.metadata.ttl.map_or(false, |ttl| {
             let elapsed = Utc::now().signed_duration_since(self.metadata.updated_at.0);
-            match chrono::Duration::from_std(ttl) {
-                Ok(d) => elapsed > d,
-                Err(_) => false,
-            }
-        } else {
-            false
-        }
+            chrono::Duration::from_std(ttl).map_or(false, |d| elapsed > d)
+        })
     }
 
     pub fn update(&mut self, new_data: BsonDocument) {

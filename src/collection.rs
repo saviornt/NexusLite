@@ -17,7 +17,7 @@ pub struct Collection {
 
 impl Collection {
     pub fn new(name: String, storage: Arc<RwLock<Box<dyn StorageEngine>>>, cache_capacity: usize) -> Self {
-        Collection {
+        Self {
             name: Arc::new(RwLock::new(name)),
             cache: Cache::new(cache_capacity),
             storage,
@@ -27,7 +27,7 @@ impl Collection {
     }
 
     pub fn new_with_config(name: String, storage: Arc<RwLock<Box<dyn StorageEngine>>>, config: crate::cache::CacheConfig) -> Self {
-        Collection {
+        Self {
             name: Arc::new(RwLock::new(name)),
             cache: Cache::new_with_config(config),
             storage,
@@ -41,7 +41,8 @@ impl Collection {
     let doc_id = document.id.clone();
     // First, persist operation
     let operation = Operation::Insert { document: document.clone() };
-    if let Err(e) = self.storage.write().append(&operation) {
+    let res = { let mut st = self.storage.write(); st.append(&operation) };
+    if let Err(e) = res {
         log::error!("storage append(insert) failed: {e}");
     }
     // Then apply to cache and indexes
@@ -50,10 +51,10 @@ impl Collection {
     index_insert_all(&mut self.indexes.write(), &document.data.0, &doc_id);
     // Emit index deltas for WASP overlay
     let mut st = self.storage.write();
-    for (field, idx) in self.indexes.read().indexes.iter() {
+    for (field, idx) in &self.indexes.read().indexes {
         // For simplicity, we only support top-level equality key extraction for Hash index
         if let Some(v) = document.data.0.get(field) {
-            let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(*i as i64)), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
+            let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(i64::from(*i))), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
             if let Some(k) = key {
                 let kind = match idx { IndexImpl::Hash(_) => crate::index::IndexKind::Hash, IndexImpl::BTree(_) => crate::index::IndexKind::BTree };
                 let delta = IndexDelta { collection: self.name_str(), field: field.clone(), kind, op: DeltaOp::Add, key: k, id: doc_id.clone() };
@@ -72,11 +73,12 @@ impl Collection {
         let _guard = self.build_lock.read();
         if let Some(old) = self.cache.get(id) {
             // Prepare updated document with same ID
-            let mut new_doc_same_id = new_document.clone();
+            let mut new_doc_same_id = new_document;
             new_doc_same_id.id = id.clone();
             // Persist update first
             let operation = Operation::Update { document_id: id.clone(), new_document: new_doc_same_id.clone() };
-            if let Err(e) = self.storage.write().append(&operation) {
+            let res = { let mut st = self.storage.write(); st.append(&operation) };
+            if let Err(e) = res {
                 log::error!("storage append(update) failed: {e}");
             }
             // Then mutate cache and indexes
@@ -86,9 +88,9 @@ impl Collection {
             telemetry::log_audit("update", &self.name_str(), &id.0.to_string(), None);
             // Emit remove deltas for old keys and add deltas for new keys
             let mut st = self.storage.write();
-            for (field, idx) in self.indexes.read().indexes.iter() {
+            for (field, idx) in &self.indexes.read().indexes {
                 if let Some(v) = old.data.0.get(field) {
-                    let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(*i as i64)), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
+                    let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(i64::from(*i))), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
                     if let Some(k) = key {
                         let kind = match idx { IndexImpl::Hash(_) => crate::index::IndexKind::Hash, IndexImpl::BTree(_) => crate::index::IndexKind::BTree };
                         let delta = IndexDelta { collection: self.name_str(), field: field.clone(), kind, op: DeltaOp::Remove, key: k, id: id.clone() };
@@ -96,7 +98,7 @@ impl Collection {
                     }
                 }
                 if let Some(v) = new_doc_same_id.data.0.get(field) {
-                    let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(*i as i64)), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
+                    let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(i64::from(*i))), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
                     if let Some(k) = key {
                         let kind = match idx { IndexImpl::Hash(_) => crate::index::IndexKind::Hash, IndexImpl::BTree(_) => crate::index::IndexKind::BTree };
                         let delta = IndexDelta { collection: self.name_str(), field: field.clone(), kind, op: DeltaOp::Add, key: k, id: id.clone() };
@@ -115,7 +117,8 @@ impl Collection {
         if let Some(old) = self.cache.get(id) {
             // Persist delete first
             let operation = Operation::Delete { document_id: id.clone() };
-            if let Err(e) = self.storage.write().append(&operation) {
+            let res = { let mut st = self.storage.write(); st.append(&operation) };
+            if let Err(e) = res {
                 log::error!("storage append(delete) failed: {e}");
             }
             // Then remove from cache and indexes
@@ -124,9 +127,9 @@ impl Collection {
             telemetry::log_audit("delete", &self.name_str(), &id.0.to_string(), None);
             // Emit remove deltas
             let mut st = self.storage.write();
-            for (field, idx) in self.indexes.read().indexes.iter() {
+            for (field, idx) in &self.indexes.read().indexes {
                 if let Some(v) = old.data.0.get(field) {
-                    let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(*i as i64)), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
+                    let key = match v { bson::Bson::String(s) => Some(DeltaKey::Str(s.clone())), bson::Bson::Int32(i) => Some(DeltaKey::I64(i64::from(*i))), bson::Bson::Int64(i) => Some(DeltaKey::I64(*i)), bson::Bson::Double(f) => Some(DeltaKey::F64(*f)), bson::Bson::Boolean(b) => Some(DeltaKey::Bool(*b)), _ => None };
                     if let Some(k) = key {
                         let kind = match idx { IndexImpl::Hash(_) => crate::index::IndexKind::Hash, IndexImpl::BTree(_) => crate::index::IndexKind::BTree };
                         let delta = IndexDelta { collection: self.name_str(), field: field.clone(), kind, op: DeltaOp::Remove, key: k, id: id.clone() };
@@ -141,16 +144,12 @@ impl Collection {
     }
 
     pub fn get_all_documents(&self) -> Vec<Document> {
-        let mut documents = Vec::new();
         // This is not efficient and should be used carefully.
         // It clones all documents in the cache.
         // A better implementation would be to have an iterator.
         let cache = self.cache.clone();
         let store = cache.store.read();
-        for (_, doc) in store.iter() {
-            documents.push(doc.clone());
-        }
-        documents
+        store.iter().map(|(_, doc)| doc.clone()).collect()
     }
 
     /// Return only the IDs of all documents without cloning each document.
@@ -173,7 +172,7 @@ impl Collection {
         *self.name.write() = new_name;
     }
 
-    /// Returns the collection's name as a String (cloned), hiding the RwLock.
+    /// Returns the collection's name as a String (cloned), hiding the `RwLock`.
     pub fn name_str(&self) -> String {
         self.name.read().clone()
     }

@@ -69,12 +69,12 @@ pub fn set(name: &str, enabled: bool) -> bool {
 /// Ensure a feature exists (register if missing) with provided default and description.
 pub fn ensure(name: &str, default_enabled: bool, description: &str) {
     let mut g = FLAGS.write();
-    g.entry(name.to_string()).or_insert(FeatureFlag { name: name.to_string(), enabled: default_enabled, description: description.to_string() });
+    g.entry(name.to_string()).or_insert_with(|| FeatureFlag { name: name.to_string(), enabled: default_enabled, description: description.to_string() });
 }
 
 /// Returns whether a feature is enabled (false if unknown).
 pub fn is_enabled(name: &str) -> bool {
-    FLAGS.read().get(name).map(|f| f.enabled).unwrap_or(false)
+    FLAGS.read().get(name).is_some_and(|f| f.enabled)
 }
 
 /// Get a feature by name.

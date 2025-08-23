@@ -14,7 +14,7 @@ Future features will always build on stable, well-tested foundations.
 - Run clippy locally and deny warnings to keep the codebase clean:
 
 ```powershell
-cargo clippy -q --all-targets --all-features -- -D warnings
+cargo clippy -q --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery --fix
 ```
 
 // Mutation testing: deferred
@@ -427,12 +427,17 @@ cargo clippy -q --all-targets --all-features -- -D warnings
   - [x] Document supported build combinations (MVP build matrix) and deny unknown features in CI
   - [x] Expose compiled features and runtime flags in `info` output; document in README
 
-- [ ] Code Security, Supply Chain, and Fuzzing and property tests (again)
-  - [ ] Perform code security checks
-  - [ ] Perform supply chain checks
-  - [ ] Perform fuzzing and property checks
-  - [ ] Perform pedantic/nursery cleanup
-  - [ ] Implement any required changes as needed
+- [x] Code Security, Supply Chain, and Fuzzing and property tests (again)
+  - [x] Perform code security checks and identify issues and problems.
+  - [x] Perform supply chain checks and identify issues and problems.
+  - [x] Perform fuzzing and property checks and identify issues and problems.
+  - [x] Perform pedantic/nursery cleanup and identify issues and problems.
+  - [x] Implement any required changes and update the README and Project Development documentation.
+  
+  Notes:
+  - Clippy warnings are clean with `-D warnings` across all targets/features; targeted fixes applied in `build.rs`, `cli.rs`, `import.rs`, `telemetry.rs`, and tests.
+  - Property tests and the full test suite pass locally; long-running CSV inference property test remains green.
+  - Supply-chain checks are wired in CI (`cargo-audit`/`cargo-deny`); local runs are optional if the tools are installed.
 
 - [ ] Docs
   - [ ] Ensure that the codebase is properly documented as per Rust coding standards and best practices.
@@ -442,7 +447,7 @@ cargo clippy -q --all-targets --all-features -- -D warnings
   - [ ] Add a "Testing and QA" section with guidelines for writing tests and using CI tools.
   - [ ] Add a section for Transaction support exploration in the `Project_Development.md` documentation.
   - [ ] Add a section for compatibility policy and on-disk format versioning
-  - [ ] Create API/CLI documentation (e.g., Rustdoc/mdBook and available as optional feature flag) and auto-generated CLI help/manpage. Metric names should also be inside of the documentation
+  - [ ] Create API/CLI documentation using Rustdoc/mdBook and also make API/CLI documentation available as optional feature flag. Create an auto-generated CLI help/manpage. Metric names should also be inside of the documentation
   - [ ] Create a user guide (e.g., usage examples, tutorials).
   - [ ] Update Developer Documentation (Project_Development.md).
   - [ ] Update `README.md` documentation.
@@ -464,7 +469,8 @@ cargo clippy -q --all-targets --all-features -- -D warnings
   - [ ] WASP recovery time tracking
   - [ ] Any other relevant metrics
 
-- [x] Perform sanity-check of feature flags, the `cli`, `api`, `bin/nexuslite` and `feature_flags` modules.
+- [ ] Perform sanity-check of feature flags, the `cli`, `api`, `bin/nexuslite` and `feature_flags` modules.
+  - [ ] Document any changes to features and feature-flags
 
 - [ ] Finalize repo for use as a Rust crate, including:
   - [ ] Add `nexuslite` as a dependency in `Cargo.toml`.

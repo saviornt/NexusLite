@@ -1,6 +1,7 @@
 use crate::document::{Document, DocumentType};
 use crate::engine::Engine;
 use bson::Document as BsonDocument;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -68,6 +69,11 @@ pub struct ImportReport {
     pub skipped: u64,
 }
 
+/// Import data from a file path into the target collection.
+///
+/// Errors
+/// Returns I/O errors on read failures, parse errors (wrapped as InvalidData),
+/// and writer errors for sidecar files when enabled.
 pub fn import_file<P: AsRef<Path>>(engine: &Engine, path: P, opts: &ImportOptions) -> io::Result<ImportReport> {
     log::info!("import: path={}, collection={}", path.as_ref().display(), opts.collection);
     let file = File::open(&path)?;
@@ -82,8 +88,7 @@ pub fn import_file<P: AsRef<Path>>(engine: &Engine, path: P, opts: &ImportOption
 fn detect_format<R: BufRead>(reader: &mut R, path: &Path) -> io::Result<ImportFormat> {
     if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         match ext.to_lowercase().as_str() {
-            "jsonl" | "ndjson" => return Ok(ImportFormat::Ndjson),
-            "json" => return Ok(ImportFormat::Ndjson),
+            "jsonl" | "ndjson" | "json" => return Ok(ImportFormat::Ndjson),
             "csv" => return Ok(ImportFormat::Csv),
             "bson" => return Ok(ImportFormat::Bson),
             _ => {}
@@ -107,6 +112,10 @@ fn detect_format<R: BufRead>(reader: &mut R, path: &Path) -> io::Result<ImportFo
     Ok(ImportFormat::Csv)
 }
 
+/// Import data from an arbitrary reader.
+///
+/// Errors
+/// Returns I/O errors on read failures and parse errors (InvalidData).
 pub fn import_from_reader<R: Read>(engine: &Engine, reader: R, format: ImportFormat, opts: &ImportOptions) -> io::Result<ImportReport> {
     let collection = engine
         .get_collection(&opts.collection)
@@ -114,15 +123,15 @@ pub fn import_from_reader<R: Read>(engine: &Engine, reader: R, format: ImportFor
     let mut report = ImportReport::default();
     let doc_type = if opts.persistent { DocumentType::Persistent } else { DocumentType::Ephemeral };
     match format {
-        ImportFormat::Ndjson => import_ndjson(collection, reader, doc_type, opts, &mut report)?,
-        ImportFormat::Csv => import_csv(collection, reader, doc_type, opts, &mut report)?,
-        ImportFormat::Bson => import_bson(collection, reader, doc_type, opts, &mut report)?,
+        ImportFormat::Ndjson => import_ndjson(&collection, reader, doc_type, opts, &mut report)?,
+        ImportFormat::Csv => import_csv(&collection, reader, doc_type, opts, &mut report)?,
+        ImportFormat::Bson => import_bson(&collection, reader, doc_type, opts, &mut report)?,
         ImportFormat::Auto => unreachable!(),
     }
     Ok(report)
 }
 
-fn import_ndjson<R: Read>(collection: std::sync::Arc<crate::collection::Collection>, reader: R, doc_type: DocumentType, opts: &ImportOptions, report: &mut ImportReport) -> io::Result<()> {
+fn import_ndjson<R: Read>(collection: &std::sync::Arc<crate::collection::Collection>, reader: R, doc_type: DocumentType, opts: &ImportOptions, report: &mut ImportReport) -> io::Result<()> {
     if opts.json.array_mode {
         // Read entire content and parse as JSON array (sufficient for moderate inputs and tests)
         let mut s = String::new();
@@ -132,8 +141,8 @@ fn import_ndjson<R: Read>(collection: std::sync::Arc<crate::collection::Collecti
         let arr = val.as_array().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "expected JSON array"))?;
         for v in arr {
             let bdoc: BsonDocument = bson::to_document(v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            let mut d = Document::new(bdoc.clone(), doc_type.clone());
-            apply_ttl(&mut d, &bdoc, &opts.ttl_field);
+            let mut d = Document::new(bdoc.clone(), doc_type);
+            apply_ttl(&mut d, &bdoc, opts.ttl_field.as_deref());
             collection.insert_document(d);
             report.inserted += 1;
         }
@@ -156,8 +165,8 @@ fn import_ndjson<R: Read>(collection: std::sync::Arc<crate::collection::Collecti
         match serde_json::from_str::<serde_json::Value>(line) {
             Ok(v) => {
                 let bdoc: BsonDocument = bson::to_document(&v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                let mut d = Document::new(bdoc.clone(), doc_type.clone());
-                apply_ttl(&mut d, &bdoc, &opts.ttl_field);
+                let mut d = Document::new(bdoc.clone(), doc_type);
+                apply_ttl(&mut d, &bdoc, opts.ttl_field.as_deref());
                 collection.insert_document(d);
                 report.inserted += 1;
                 if let Some(n) = opts.progress_every && line_no % n == 0 { log::info!("imported {} records (ndjson)", report.inserted); }
@@ -173,13 +182,13 @@ fn import_ndjson<R: Read>(collection: std::sync::Arc<crate::collection::Collecti
     Ok(())
 }
 
-fn import_csv<R: Read>(collection: std::sync::Arc<crate::collection::Collection>, reader: R, doc_type: DocumentType, opts: &ImportOptions, report: &mut ImportReport) -> io::Result<()> {
+fn import_csv<R: Read>(collection: &std::sync::Arc<crate::collection::Collection>, reader: R, doc_type: DocumentType, opts: &ImportOptions, report: &mut ImportReport) -> io::Result<()> {
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(opts.csv.has_headers)
         .delimiter(opts.csv.delimiter)
         .from_reader(reader);
     let headers: Vec<String> = if opts.csv.has_headers {
-        rdr.headers().map(|h| h.iter().map(|s| s.to_string()).collect()).unwrap_or_default()
+        rdr.headers().map(|h| h.iter().map(std::string::ToString::to_string).collect()).unwrap_or_default()
     } else { vec![] };
     let mut row_no: usize = 0;
     let mut sidecar = match &opts.error_sidecar {
@@ -190,7 +199,8 @@ fn import_csv<R: Read>(collection: std::sync::Arc<crate::collection::Collection>
         row_no += 1;
         let rec = match rec { Ok(r) => r, Err(e) => {
             if let Some(f) = sidecar.as_mut() { let _ = writeln!(f, "{{\"row\":{},\"error\":\"{}\"}}", row_no, escape_json(&e.to_string())); }
-            if opts.skip_errors { report.skipped += 1; continue; } else { return Err(io::Error::new(io::ErrorKind::InvalidData, e)); }
+            if opts.skip_errors { report.skipped += 1; continue; }
+            return Err(io::Error::new(io::ErrorKind::InvalidData, e));
         } };
     let mut map = BsonDocument::new();
         if opts.csv.has_headers && !headers.is_empty() {
@@ -203,11 +213,13 @@ fn import_csv<R: Read>(collection: std::sync::Arc<crate::collection::Collection>
                 map.insert(format!("field_{i}"), field_to_bson(field, opts.csv.type_infer));
             }
         }
-        let mut d = Document::new(map.clone(), doc_type.clone());
-        apply_ttl(&mut d, &map, &opts.ttl_field);
-        collection.insert_document(d);
+    let mut d = Document::new(map.clone(), doc_type);
+    apply_ttl(&mut d, &map, opts.ttl_field.as_deref());
+    collection.insert_document(d);
     report.inserted += 1;
-    if let Some(n) = opts.progress_every && row_no % n == 0 { log::info!("imported {} records (csv)", report.inserted); }
+    if let Some(n) = opts.progress_every && row_no % n == 0 {
+        log::info!("imported {} records (csv)", report.inserted);
+    }
     }
     Ok(())
 }
@@ -223,14 +235,14 @@ fn field_to_bson(field: &str, infer: bool) -> bson::Bson {
     }
 }
 
-fn import_bson<R: Read>(collection: std::sync::Arc<crate::collection::Collection>, mut reader: R, doc_type: DocumentType, _opts: &ImportOptions, report: &mut ImportReport) -> io::Result<()> {
+fn import_bson<R: Read>(collection: &std::sync::Arc<crate::collection::Collection>, mut reader: R, doc_type: DocumentType, _opts: &ImportOptions, report: &mut ImportReport) -> io::Result<()> {
     let mut full = Vec::with_capacity(4096);
     loop {
         let mut len_buf = [0u8; 4];
         if reader.read_exact(&mut len_buf).is_err() { break; }
-        let len = i32::from_le_bytes(len_buf);
-        if len <= 0 || len > 16_000_000 { return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid bson size")); }
-        let len = len as usize;
+    let len = i32::from_le_bytes(len_buf);
+    if len <= 0 || len > 16_000_000 { return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid bson size")); }
+    let len = usize::try_from(len).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid bson size"))?;
         if full.capacity() < len { full.reserve(len - full.capacity()); }
         full.clear();
         // Extend to full length and fill
@@ -240,8 +252,8 @@ fn import_bson<R: Read>(collection: std::sync::Arc<crate::collection::Collection
         reader.read_exact(&mut full[start..])?;
         match bson::Document::from_reader(&mut &full[..]) {
             Ok(doc) => {
-                let mut d = Document::new(doc.clone(), doc_type.clone());
-                apply_ttl(&mut d, &doc, &None);
+                let mut d = Document::new(doc.clone(), doc_type);
+                apply_ttl(&mut d, &doc, None);
                 collection.insert_document(d);
                 report.inserted += 1;
             }
@@ -251,17 +263,19 @@ fn import_bson<R: Read>(collection: std::sync::Arc<crate::collection::Collection
     Ok(())
 }
 
-fn apply_ttl(doc: &mut Document, map: &BsonDocument, ttl_field: &Option<String>) {
+fn apply_ttl(doc: &mut Document, map: &BsonDocument, ttl_field: Option<&str>) {
     if !matches!(doc.metadata.document_type, DocumentType::Ephemeral) { return; }
-    let Some(key) = ttl_field.as_ref() else { return; };
+    let Some(key) = ttl_field else { return; };
     if let Some(val) = map.get(key)
         && let Some(secs) = match val {
-            bson::Bson::Int32(i) => Some(*i as i64),
+            bson::Bson::Int32(i) => Some(i64::from(*i)),
             bson::Bson::Int64(i) => Some(*i),
+            #[allow(clippy::cast_possible_truncation)]
             bson::Bson::Double(f) => Some(*f as i64),
             bson::Bson::String(s) => s.parse::<i64>().ok(),
             _ => None,
         } {
+        #[allow(clippy::cast_sign_loss)]
         doc.set_ttl(std::time::Duration::from_secs(secs as u64));
     }
 }

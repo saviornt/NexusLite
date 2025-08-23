@@ -20,10 +20,15 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Create a new Engine backed by the WAL storage engine.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying storage engine fails to initialize.
     pub fn new(wal_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
     let wal = Wal::new(wal_path)?;
     // Resolve and cache metadata path at engine creation to avoid env var races in tests
-    let metadata_path = if let Ok(p) = std::env::var("NEXUS_INDEX_META") { PathBuf::from(p) } else { PathBuf::from("nexus_indexes.json") };
+    let metadata_path = std::env::var("NEXUS_INDEX_META")
+        .map_or_else(|_| PathBuf::from("nexus_indexes.json"), PathBuf::from);
     let metadata_path = if metadata_path.is_absolute() { metadata_path } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(metadata_path) };
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
@@ -74,6 +79,10 @@ impl Engine {
         self.collections.read().keys().cloned().collect()
     }
 
+    /// Rename an existing collection.
+    ///
+    /// # Errors
+    /// Returns `NoSuchCollection` if `old` doesn't exist or `CollectionAlreadyExists` if `new` already exists.
     pub fn rename_collection(&self, old: &str, new: &str) -> Result<(), crate::errors::DbError> {
         let mut map = self.collections.write();
         if !map.contains_key(old) {
@@ -82,10 +91,9 @@ impl Engine {
         if map.contains_key(new) {
             return Err(crate::errors::DbError::CollectionAlreadyExists(new.to_string()));
         }
-    let col = match map.remove(old) {
-        Some(c) => c,
-        None => return Err(crate::errors::DbError::NoSuchCollection(old.to_string())),
-    };
+        let Some(col) = map.remove(old) else {
+            return Err(crate::errors::DbError::NoSuchCollection(old.to_string()));
+        };
     col.set_name(new.to_string());
     map.insert(new.to_string(), col);
         Ok(())
@@ -94,10 +102,14 @@ impl Engine {
 
 impl Engine {
     /// Construct an Engine backed by the WASP storage engine.
+    ///
+    /// # Errors
+    /// Returns an error if the storage engine fails to initialize or if ephemeral cache setup fails.
     pub fn with_wasp(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
     let wasp = Wasp::new(path)?;
     // Resolve and cache metadata path at engine creation to avoid env var races in tests
-    let metadata_path = if let Ok(p) = std::env::var("NEXUS_INDEX_META") { PathBuf::from(p) } else { PathBuf::from("nexus_indexes.json") };
+    let metadata_path = std::env::var("NEXUS_INDEX_META")
+        .map_or_else(|_| PathBuf::from("nexus_indexes.json"), PathBuf::from);
     let metadata_path = if metadata_path.is_absolute() { metadata_path } else { std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(metadata_path) };
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
@@ -114,10 +126,11 @@ impl Engine {
 
 impl Engine {
     /// Ensure the ephemeral collection exists and preload ephemeral docs from storage.
+    /// # Errors
+    /// Returns an error if reading operations from the storage engine fails.
     fn init_ephemeral_cache(&self) -> Result<(), Box<dyn std::error::Error>> {
         let temp_collection = self.create_collection("_tempDocuments".to_string());
-        let storage = self.storage.read();
-        let operations = storage.read_all()?;
+        let operations = self.storage.read().read_all()?;
         for operation in operations.into_iter().flatten() {
             if let crate::types::Operation::Insert { document } = operation
                 && document.metadata.document_type == DocumentType::Ephemeral
@@ -134,7 +147,9 @@ impl Engine {
         if let Ok(bytes) = fs::read(&path) {
             if let Ok(mut meta) = serde_json::from_slice::<IndexesMetadata>(&bytes) {
                 for (col_name, descs) in meta.collections.clone() {
-                    let col = if let Some(c) = self.get_collection(&col_name) { c } else { self.create_collection(col_name.clone()) };
+                    let col = self
+                        .get_collection(&col_name)
+                        .map_or_else(|| self.create_collection(col_name.clone()), |c| c);
                     for d in descs { col.create_index(&d.field, d.kind); }
                 }
                 if meta.version != INDEX_METADATA_VERSION {
@@ -145,14 +160,13 @@ impl Engine {
                 // Fallback tolerant parse for legacy shapes
                 let mut collections: HashMap<String, Vec<IndexDescriptor>> = HashMap::new();
                 if let Some(map) = val.get("collections").and_then(|v| v.as_object()) {
-                    for (cname, arr) in map.iter() {
+                    for (cname, arr) in map {
                         if let Some(items) = arr.as_array() {
                             let mut v = Vec::new();
                             for it in items {
                                 let field = it.get("field").and_then(|x| x.as_str()).unwrap_or("").to_string();
                                 let kind_str = it.get("kind").and_then(|x| x.as_str()).unwrap_or("");
                                 let kind = match kind_str {
-                                    "Hash" | "hash" => IndexKind::Hash,
                                     "BTree" | "btree" | "Btree" => IndexKind::BTree,
                                     _ => IndexKind::Hash,
                                 };
@@ -163,7 +177,9 @@ impl Engine {
                     }
                 }
                 for (col_name, descs) in collections.clone() {
-                    let col = if let Some(c) = self.get_collection(&col_name) { c } else { self.create_collection(col_name.clone()) };
+                    let col = self
+                        .get_collection(&col_name)
+                        .map_or_else(|| self.create_collection(col_name.clone()), |c| c);
                     for d in descs { col.create_index(&d.field, d.kind); }
                 }
                 let meta = IndexesMetadata { version: INDEX_METADATA_VERSION, collections };
@@ -172,6 +188,8 @@ impl Engine {
         }
     }
 
+    /// # Errors
+    /// Returns an error if writing index metadata to disk fails.
     pub fn save_indexes_metadata(&self) -> std::io::Result<()> {
         let mut collections_meta: HashMap<String, Vec<IndexDescriptor>> = HashMap::new();
         for (name, col) in self.collections.read().iter() {
@@ -195,6 +213,8 @@ impl Engine {
     }
 
     /// Persist a checkpoint of data and index metadata into the main DB file when using WASP.
+    /// # Errors
+    /// Returns an error if the underlying storage engine checkpoint fails.
     pub fn checkpoint_with_indexes(&self, db_path: &std::path::Path) -> std::io::Result<()> {
         // Collect index descriptors per collection
         let mut map: HashMap<String, Vec<IndexDescriptor>> = HashMap::new();

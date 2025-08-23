@@ -69,7 +69,7 @@ fn parse_import_format(s: &Option<String>) -> ImportFormat {
     match parse_format_input(s).as_deref() {
         Some("csv") => ImportFormat::Csv,
         Some("bson") => ImportFormat::Bson,
-        Some("ndjson") | Some("json") | Some("jsonl") => ImportFormat::Ndjson,
+        Some("ndjson" | "json" | "jsonl") => ImportFormat::Ndjson,
         _ => ImportFormat::Auto,
     }
 }
