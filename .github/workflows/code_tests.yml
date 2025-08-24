@@ -1,5 +1,5 @@
 # This workflow consolidates various CI and testing jobs into a single file.
-# It now runs all tests on both Ubuntu and Windows to ensure platform compatibility.
+# It runs all tests on both Ubuntu and Windows to ensure platform compatibility.
 
 name: Code Tests
 
