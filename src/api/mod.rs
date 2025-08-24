@@ -9,7 +9,6 @@ use crate::errors::DbError;
 use crate::export::{export_file, ExportOptions};
 use crate::import::{import_file, ImportOptions};
 use crate::query::{self, Filter, FindOptions, UpdateDoc};
-use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::path::PathBuf;
 // Build-time generated list of compiled features
@@ -28,46 +27,20 @@ pub fn db_open(db_path: &str) -> Result<crate::Database, DbError> {
     let pbe_db = crate::crypto::pbe_is_encrypted(&pb);
     let pbe_wasp = wasp.exists() && crate::crypto::pbe_is_encrypted(&wasp);
     if pbe_db || pbe_wasp {
-        let mut username = std::env::var("NEXUSLITE_USERNAME").unwrap_or_default();
-        let mut password = std::env::var("NEXUSLITE_PASSWORD").unwrap_or_default();
-        if username.is_empty() {
-            if io::stdin().is_terminal() {
-                eprint!("Username: ");
-                let _ = io::stderr().flush();
-                username = read_line_stdin().map_err(|e| DbError::Io(e.to_string()))?;
-            } else {
-                return Err(DbError::Io(
-                    "PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD".into(),
-                ));
-            }
-        }
-        if password.is_empty() {
-            if io::stdin().is_terminal() {
-                // Masked password input
-                password = rpassword::prompt_password("Password: ")
-                    .map_err(|e| DbError::Io(e.to_string()))?;
-            } else {
-                return Err(DbError::Io(
-                    "PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD".into(),
-                ));
-            }
+        // Programmatic API is non-interactive: require env vars when PBE-encrypted
+        let username = std::env::var("NEXUSLITE_USERNAME").unwrap_or_default();
+        let password = std::env::var("NEXUSLITE_PASSWORD").unwrap_or_default();
+        if username.is_empty() || password.is_empty() {
+            return Err(DbError::Io(
+                "PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD".into(),
+            ));
         }
         crate::api::decrypt_db_with_password(pb.as_path(), &username, &password)?;
     }
     crate::Database::open(db_path).map_err(|e| DbError::Io(e.to_string()))
 }
 
-fn read_line_stdin() -> Result<String, std::io::Error> {
-    let mut s = String::new();
-    std::io::stdin().read_line(&mut s)?;
-    if s.ends_with('\n') {
-        s.pop();
-        if s.ends_with('\r') {
-            s.pop();
-        }
-    }
-    Ok(s)
-}
+// (interactive helper removed; API is non-interactive)
 
 pub fn db_new(db_path: Option<&str>) -> Result<crate::Database, DbError> {
     crate::Database::new(db_path).map_err(|e| DbError::Io(e.to_string()))

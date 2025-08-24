@@ -76,7 +76,7 @@ nexuslite features-check
 
 CI
 
-- A workflow at `.github/workflows/features-check.yml` runs `features-print` and `features-check` on pushes/PRs.
+- The Code Tests workflow (`.github/workflows/code_tests.yml`) runs `features-print` and `features-check` on pushes/PRs.
 
 ```rust
 use nexus_lite::engine::Engine;
@@ -159,9 +159,9 @@ Remediation:
 
 ## Build and test
 
-### Recovery manager
+### Recovery helpers
 
-The storage and recovery code lives under `crate::storage` (WASP/WAL). A new façade `crate::recovery_manager` re-exports these modules and adds helpers in `recovery_manager::recovery`:
+Recovery helpers live under `crate::recovery::recover`, and WASP internals are exposed under `crate::recovery::wasp`:
 
 - `verify_manifests(path: &Path) -> io::Result<ConsistencyReport>` — inspect both WASP manifest slots with diagnostics.
 - `repair_manifests(path: &Path) -> io::Result<ConsistencyReport>` — copy the newest valid manifest into the other slot.
@@ -278,18 +278,18 @@ nexuslite open-db .\\mydb.db --verify-sig --pubkey .\\pub.pem
 nexuslite open-db .\\mydb.db --verify-sig --pubkey .\\pub.pem --sig-warn
 ```
 
-- Cache (TTL/LRU/LFU, metrics, sweeper): `tests/mod_cache.rs`
-- Collections CRUD + index create/drop: `tests/mod_collection.rs`, `tests/mod_index.rs`
-- Query (filters, projection, sort, pagination): `tests/mod_query.rs`
-- Query extras: regex and timeout: `tests/mod_query_features.rs` (enable with `--features regex`)
-- Import/Export NDJSON/CSV and options: `tests/mod_import.rs`
-- Import/Export BSON roundtrip: `tests/mod_import.rs::test_import_bson_and_export_bson_roundtrip`
+- Cache (TTL/LRU/LFU, metrics, sweeper): `tests/integration_tests/cache/mod_cache.rs`
+- Collections CRUD + index create/drop: `tests/integration_tests/collection/mod_collection.rs`, `tests/integration_tests/database/mod_index.rs`
+- Query (filters, projection, sort, pagination): `tests/integration_tests/query/mod_query.rs`
+- Query extras: regex and timeout (enable with `--features regex`)
+- Import/Export NDJSON/CSV and options: `tests/integration_tests/import/mod_import.rs`
+- Import/Export BSON roundtrip: see import tests in `tests/integration_tests/import/`
 
 Benchmark-only WAL example lives in `benchmarks/wal.rs`.
 
-- WASP internals: CoW tree, segments, tiny WAL, checksum, torn-write: `tests/mod_wasp.rs`
-- Snapshot/Checkpoint with index descriptors: `tests/mod_snapshot.rs`
-- Paths, logging folders, DB/WASP files: `tests/mod_paths.rs`
+- WASP internals: CoW tree, segments, tiny WAL, checksum, torn-write: `tests/integration_tests/recovery/wasp/mod_wasp.rs`
+- Snapshot/Checkpoint with index descriptors: `tests/integration_tests/database/mod_snapshot.rs`
+- Paths, logging folders, DB/WASP files: `tests/integration_tests/database/mod_paths.rs`
 
 Run core suite:
 
@@ -301,6 +301,49 @@ Run with regex feature enabled for regex tests:
 
 ```powershell
 cargo test --features regex -- --nocapture
+```
+
+### Interactive tests (manual)
+
+Some tests require a real terminal to interact with prompts (for PBE-encrypted DB open). These tests are ignored by default and must be run explicitly from a terminal/PowerShell window (not an IDE’s test panel):
+
+```powershell
+# Open a separate terminal window and run the interactive suite
+cargo test --test interactive -- --ignored --nocapture
+
+# You will be prompted for credentials:
+#   - Correct creds test: Username: admin, Password: password (should succeed)
+#   - Incorrect creds test: a random username/password will be printed; enter those (should fail)
+```
+
+If stdin is not a TTY (e.g., when run under some IDE runners), the interactive tests will skip to avoid hanging.
+
+### Test suites and cargo aliases
+
+This repo uses three test suites:
+
+- Integration tests: `tests/integration_tests/`
+- Property tests: `tests/prop_tests/`
+- Interactive tests (manual): `tests/interactive/` (ignored by default)
+
+Convenience cargo aliases are defined in `.cargo/config.toml`:
+
+- Unit tests (colocated in src via `#[cfg(test)]`):
+
+```powershell
+cargo unit-tests
+```
+
+- Integration tests:
+
+```powershell
+cargo integration-tests
+```
+
+- Property tests:
+
+```powershell
+cargo prop-tests
 ```
 
 ## Database Architecture
@@ -335,15 +378,23 @@ NexusLite
 │   ├── export\
 │   ├── import\
 │   ├── query\
-│   ├── storage\
+│   ├── recovery\
 │   ├── utils\
 │   └── lib.rs
 ├── tests\
-│   ├── common\
-│   ├── mod_*.rs
+│   ├── integration_tests\
+│   │   ├── cache\
+│   │   ├── collection\
+│   │   ├── database\
+│   │   ├── import\
+│   │   ├── query\
+│   │   └── recovery\
+│   ├── interactive\
+│   └── prop_tests\
 ├── Cargo.lock
 ├── Cargo.toml
-└── Project_Development.md
+├── Project_Development.md
+└── Project_Roadmap.md
 ```
 
 ---
@@ -384,14 +435,10 @@ NexusLite
   - Per-collection cache configuration and runtime tuning
   - Metrics: hits/misses, eviction counts, memory/latency stats
 
-### WAL Module: wal.rs
+### WAL (benchmark-only)
 
-- Purpose: Append-only write-ahead log to ensure durability and enable recovery.
-- Features:
-  - Append operations before commit for crash consistency
-  - Read/replay log records on startup to rebuild state
-  - Lightweight record format with basic integrity checks
-  - Used as an alternative pluggable backend for benchmarking
+- Purpose: A minimal write-ahead log used only in benchmarks for comparison against WASP.
+- Notes: Not used by the main engine; see `benchmarks/wal.rs`.
 
 ### WASP Module: wasp.rs
 
@@ -425,7 +472,7 @@ NexusLite
 - Purpose: Orchestrates collections and persistence backends.
 - Features:
   - Create/get/delete collections; list collection names
-  - Pluggable storage: WAL or WASP (default via Engine::with_wasp)
+  - WASP-backed storage via `Engine::with_wasp`
   - Hidden `_tempDocuments` collection for ephemeral docs
   - On startup, loads ephemeral docs into cache when applicable
   - Thread-safe via parking_lot::RwLock
@@ -492,11 +539,11 @@ NexusLite
 - Purpose: User-facing database wrapper around Engine with ergonomic helpers.
 - Features:
   - `Database::new(name_or_path: Option<&str>)` to create the DB (and `.wasp`) if missing
-  - `Database::open(name_or_path: Option<&str>)` to open an existing DB (errors `Database Not Found` if missing)
+  - `Database::open(name_or_path: &str)` to open an existing DB (errors `Database Not Found` if missing)
   - `Database::close(name_or_path: Option<&str>)` to close/unregister an open DB handle
-  - Collection management: create/get/delete, list names, `rename_collection`
+  - Collection management: create/get/delete, `list_collection_names`, `rename_collection`
   - Document helpers: insert/update/delete
-  - `nexus_lite::init()` to initialize logging
+  - `checkpoint(&Path)` persists snapshot with index descriptors
 
 ---
 
@@ -508,9 +555,6 @@ use nexus_lite::document::{Document, DocumentType};
 use nexus_lite::Database;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  // Initialize logging, etc.
-  nexus_lite::init()?;
-
   // Create or open database (WASP-backed by default)
   // Use default name (nexuslite.db / nexuslite.wasp)
   let db = Database::new(None)?;

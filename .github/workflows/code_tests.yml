@@ -15,6 +15,10 @@ on:
   # Allows for manual triggering of the workflow from the GitHub Actions UI.
   workflow_dispatch:
 
+# Restrict the default GITHUB_TOKEN permissions for all jobs (CodeQL recommendation)
+permissions:
+  contents: read
+
 jobs:
   # Build and Linting Jobs
   # ---
@@ -88,16 +92,12 @@ jobs:
       - name: Run Cargo audit (non-blocking) and save report
         id: audit
         continue-on-error: true
-        run: |
-          cargo audit --deny warnings > cargo-audit-report.txt || true
+        run: cargo audit --deny warnings > cargo-audit-report.txt
       - name: Run Cargo deny (bans/licenses/sources)
         run: cargo deny check --all-features
       - name: Report audit status
-        if: always()
-        run: |
-          if [ "${{ steps.audit.outcome }}" = "failure" ]; then
-            echo "cargo audit failed; continuing to run other checks.";
-          fi
+        if: ${{ always() && steps.audit.outcome == 'failure' }}
+        run: echo "cargo audit failed; continuing to run other checks."
       - name: Upload audit report
         uses: actions/upload-artifact@v4
         with:
@@ -232,8 +232,8 @@ jobs:
           rustup component add miri
           cargo miri setup
       - name: Run tests under Miri and save report
-        run: |
-          cargo miri test --workspace --all-features > miri-report.txt || true
+        continue-on-error: true
+        run: cargo miri test --workspace --all-features > miri-report.txt
       - name: Upload Miri report
         uses: actions/upload-artifact@v4
         with:
@@ -259,8 +259,8 @@ jobs:
       - name: Install cargo-mutants
         run: cargo install cargo-mutants
       - name: Run mutation tests and save report
-        run: |
-          cargo mutants -v > mutants-report.txt || true
+        continue-on-error: true
+        run: cargo mutants -v > mutants-report.txt
       - name: Upload mutation report
         uses: actions/upload-artifact@v4
         with:
@@ -284,18 +284,35 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --version ^0.12
       - name: Build fuzz targets
+        working-directory: fuzz
+        run: cargo fuzz build
+      - name: Create reports directory
+        run: mkdir reports
+      - name: 'Fuzz smoke: filter parser'
+        working-directory: fuzz
+        continue-on-error: true
         run: |
-          cd fuzz
-          cargo fuzz build
-      - name: Run fuzz smoke and save reports
+          cargo fuzz run fuzz_filter_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-filter-report.txt
+      - name: 'Fuzz smoke: update parser'
+        working-directory: fuzz
+        continue-on-error: true
         run: |
-          mkdir -p reports
-          cd fuzz
-          cargo fuzz run fuzz_filter_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-filter-report.txt || true
-          cargo fuzz run fuzz_update_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-update-report.txt || true
-          cargo fuzz run fuzz_eval -- -runs=2000 -timeout=5 > ../reports/fuzz-eval-report.txt || true
-          cargo fuzz run fuzz_ndjson_import -- -runs=2000 -timeout=5 > ../reports/fuzz-ndjson-report.txt || true
-          cargo fuzz run fuzz_csv_import -- -runs=2000 -timeout=5 > ../reports/fuzz-csv-report.txt || true
+          cargo fuzz run fuzz_update_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-update-report.txt
+      - name: 'Fuzz smoke: evaluator'
+        working-directory: fuzz
+        continue-on-error: true
+        run: |
+          cargo fuzz run fuzz_eval -- -runs=2000 -timeout=5 > ../reports/fuzz-eval-report.txt
+      - name: 'Fuzz smoke: NDJSON import'
+        working-directory: fuzz
+        continue-on-error: true
+        run: |
+          cargo fuzz run fuzz_ndjson_import -- -runs=2000 -timeout=5 > ../reports/fuzz-ndjson-report.txt
+      - name: 'Fuzz smoke: CSV import'
+        working-directory: fuzz
+        continue-on-error: true
+        run: |
+          cargo fuzz run fuzz_csv_import -- -runs=2000 -timeout=5 > ../reports/fuzz-csv-report.txt
       - name: Upload fuzz reports
         uses: actions/upload-artifact@v4
         with:

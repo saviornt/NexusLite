@@ -562,14 +562,24 @@ fn main() {
             if pbe_db || pbe_wasp {
                 let mut username = std::env::var("NEXUSLITE_USERNAME").unwrap_or_default();
                 let mut password = std::env::var("NEXUSLITE_PASSWORD").unwrap_or_default();
+                // Allow prompting only if we are in an interactive terminal
                 if (username.is_empty() || password.is_empty()) && std::io::stdin().is_terminal() {
+                    // In test builds, include friendly defaults in prompt text to aid manual runs.
+                    #[cfg(test)]
+                    const PROMPT_USER: &str = "Username (admin): ";
+                    #[cfg(test)]
+                    const PROMPT_PASS: &str = "Password (password): ";
+                    #[cfg(not(test))]
+                    const PROMPT_USER: &str = "Username: ";
+                    #[cfg(not(test))]
+                    const PROMPT_PASS: &str = "Password: ";
                     if username.is_empty() {
-                        eprint!("Username: ");
+                        eprint!("{}", PROMPT_USER);
                         let _ = std::io::stderr().flush();
                         username = read_line_stdin();
                     }
                     if password.is_empty() {
-                        password = rpassword::prompt_password("Password: ").unwrap_or_default();
+                        password = rpassword::prompt_password(PROMPT_PASS).unwrap_or_default();
                     }
                 }
                 if username.is_empty() || password.is_empty() {

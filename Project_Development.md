@@ -1,177 +1,117 @@
-# NexusLite - Project Development Roadmap
+# NexusLite — Project Development
 
-NexusLite is an embedded **NoSQL database engine**, inspired by the best features of **MongoDB** (document collections) and **Redis** (in-memory performance, TTL, and LRU caching). The goal is to provide a **lightweight, embeddable, efficient, and flexible** database engine similar to SQLite but for NoSQL workloads.
-
----
-
-## AGILE Project Roadmap
-
-We’ll follow an **iterative AGILE approach** where each sprint adds working, testable functionality.  
-Future features will always build on stable, well-tested foundations.
+This document is for contributors and maintainers. It covers local setup, coding standards, build/test guidance, and module notes. For the project roadmap and sprint checklists, see Project_Roadmap.md.
 
 ## Linting & Coding Standards
-
-- Run clippy locally and deny warnings to keep the codebase clean:
 
 ```powershell
 cargo clippy -q --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery --fix
 ```
 
-// Mutation testing: deferred
-// To keep local iteration fast, mutation testing is currently parked. See the Benchmarks & MVP section for future enablement notes.
+- Common lint to avoid: needless reference of operands in comparisons (clippy::op-ref).
+  - Prefer bytes[0..4] != SNAPSHOT_MAGIC over &bytes[0..4] != SNAPSHOT_MAGIC.
+- CI denies warnings; use targeted #[allow(...)] only when justified and scoped.
+- Concurrency: use parking_lot::RwLock, keep lock scopes minimal.
+- Errors/logging: thiserror + log + log4rs.
+- Avoid unwrap/expect in runtime paths; prefer ? and explicit handling.
 
-- Common lint to avoid: needless reference of operands in comparisons (`clippy::op-ref`).
-  - Prefer `bytes[0..4] != SNAPSHOT_MAGIC` over `&bytes[0..4] != SNAPSHOT_MAGIC`.
-- CI also denies warnings; only add targeted `#[allow(...)]` when justified and scoped.
-- Design with concurrency in mind using `RwLock` from the start.
-- Design with async in mind using `tokio` for both network and file-based async I/O.
-- Design modules with error handling and logging using the `thiserror`, `log`, and `log4rs` crates.
-- Testing & the use of `.unwrap()`, as per its documentation: Because this function may panic, its use is generally discouraged. Panics are meant for unrecoverable errors, and may abort the entire program. Instead, prefer to use the ? (try) operator, or pattern matching to handle the Err case explicitly, or call [unwrap_or], [unwrap_or_else], or [unwrap_or_default].
+## Local Build and Tests
 
-### Sprint 1 - Core In-Memory Engine
+- Build:
 
-- [x] Developer Documentation (Project_Development.md).
-- [x] Implement error handling and logging using the crates `log` and `log4rs`.
-- [x] Implement `Document` module (`document.rs`)
-  - Create, find, update, delete BSON-like documents.
-  - When creating a new document, the document will be assigned a document UUID v4.
-  - Documents will also store metadata that describes the document details.
-  - There should be two types of documents: persistent and temporary.
-  - Temporary document metadata will support an optional Time-To-Live (TTL) and are stored in a hidden collection and loaded into memory on startup.
-  - Allow metadata (timestamps, versioning, or user tags) be optional extension points from the start. Future upgrades benefit from this flexibility.
-- [x] Implement `Collection` module (`collection.rs`)
-  - Manage sets of documents inside named collections.
-  - Collections will maintain an index of document UUIDs.
-  - Collections will also store vector index of each document.
-  - A "hidden" collection also needs to be created called `_tempDocuments` that will contain ephemeral documents.
-- [x] Implement `Engine` module (`engine.rs`)
-  - Manage multiple collections.
-  - Create, save, delete database files.
-- [x] Implement Rust API calls to database engine (`lib.rs`)
-  - Add builder patterns (e.g. `Document::builder().field(...).build()`), to make creation more fluent.
-- [ ] Ensure `RwLock` use is properly scoped.
-  - Benchmark read-heavy scenarios to spot deadlocks early.
-- [x] Add unit & integration testing framework (`tests/` + `common/test_logger.rs`).
-- [x] Generate Rust documentation (RustDoc) using `cargo doc`.
-- [x] Perform tests and then troubleshoot and fix any issues.
-  - Due to how logging works, we do not use a `mod_logging.rs` file since we cannot have 2 loggers be initialized at the same time.
-  - Add tests around invalid UUIDs, empty collections, or creating duplicate collection names to prove resilience.
-- [x] Update Developer Documentation (Project_Development.md).
+```powershell
+cargo build
+```
 
-### Sprint 2 - Cache Layer (Redis-inspired)
+- Run all tests:
 
-- [x] Implement a **Hybrid TTL & LRU eviction policy**.
-  - [x] TTL has highest priority. Always evict entries whose TTL has expired before considering LRU-based eviction.
-  - [x] Fallback to LRU sampling when no TTL-expired entries are found; sample size configurable via `max_samples`.
-  - [x] Implemented approximation of LRU using tail sampling; tunable `max_samples` available.
-  - [x] Strategy aligns with keeping freshness over recency.
-  - [x] Separated sections in `cache.rs` combining TTL + LRU.
+```powershell
+cargo test -- --nocapture
+```
 
-- [x] Include comprehensive metrics as part of the cache layer:
-  - [x] Hit/miss counters
-  - [x] Eviction counts by type (TTL vs LRU)
-  - [x] Memory/latency stats
+- Enable regex feature tests:
 
-- [x] Give the system flexibility to tune eviction behavior:
-  - [x] Runtime adjustable `max_samples`, `batch_size`, `capacity`, and eviction mode
-  - [x] Per-collection overrides via `Engine::create_collection_with_config`
+```powershell
+cargo test --features regex -- --nocapture
+```
 
-- [x] Implement a guard against thundering evictions:
-  - [x] Eviction batching
-  - [x] Eviction lock to prevent concurrent eviction cycles
+- Clippy and formatting:
 
-- [x] Handle TTL expiration proactively
-  - [x] Background sweeper with configurable interval
-  - [x] Lazy expiration on access increments miss count
+```powershell
+cargo clippy -q --all-targets --all-features -- -D warnings
+cargo fmt --all
+```
 
-- [x] Allow configuration of TTL and LRU parameters at runtime.
-  - [x] Eviction modes: `ttl-first`, `lru-only`, `ttl-only`, `hybrid`
-  - [x] Per-collection override supported
+Notes
 
-- [x] Implement the **cache using the hybrid eviction policy** for documents.
-  - [x] Lazy eviction + periodic low-priority background purging
-  - [x] Purge trigger exposed for deterministic tests
+- Some tests are interactive and ignored by default; see README’s Interactive tests section.
+- Logs are written next to DB files when using Database::open/new.
 
-- [x] Implement logic to load all ephemeral documents from the internal `_tempDocuments` collection into the cache on database startup.
-- [x] Perform tests and then troubleshoot and fix any issues.
+## Module Overview (implementation notes)
 
-- [x] Perform unit tests for each scenario:
-  - [x] TTL expiration evicts before LRU
-  - [x] LRU sampling when no TTLs are expired
-  - [x] Batching and lock under concurrent pressure
-  - [x] Lazy-expiration counts as miss
+### Document (src/document)
 
-- [x] Update Developer Documentation (Project_Development.md).
+- BSON-backed Document with UUID v4 DocumentId and metadata (created_at, updated_at, optional TTL).
+- DocumentType::{Persistent, Ephemeral}; TTL applies to ephemeral.
+- Helpers: set_ttl, get_ttl, is_expired, update.
 
-### Sprint 3 - Persistence
+### Collection (src/collection)
 
-- [x] Implement a hybrid crash-consistent storage engine (`Write-Ahead Shadow-Paging` or `WASP`; `wasp.rs`) and make it the default backend.
-- [x] Pluggable storage engine: swap between WAL and WASP for benchmarking.
-- [x] Add a benchmark test comparing WAL vs WASP, saving results to `benchmarks/`.
+- In-memory cache (TTL-first + LRU sampling), metrics, background sweeper.
+- Append operations to storage for insert/update/delete.
+- Hidden _tempDocuments collection for ephemeral docs.
 
-- [x] Phase 0: Design and requirements for WASP:
-  - [x] Define requirements/goals (ACID level, workload patterns, durability guarantees, concurrency model).
-  - [x] Decide page size (e.g., 8–16 KB) and segment size targets (e.g., 64–256 MB).
-    - Page size should be 8-16 KB that aligns to the device. Delta pages for tiny updates.
-    - Segment size targets should be 64-256 MB and leveled compaction fan-out 8-10.
-  - [x] Choose on-disk format endianness, alignment, and checksums.
-  - [x] Implement block allocator / free space map abstraction.
-  - [x] Build manifest structure (root pointer + active segments + WAL metadata).
+### Engine (src/database/engine.rs)
 
-- [x] Phase 1: Minimal CoW Engine
-  - [x] Implement page format (headers, checksums, version ids).
-  - [x] Implement copy-on-write B-tree or LSM-like node tree for data storage.
-  - [x] Add manifest write and atomic pointer flip (double-buffered).
-  - [x] Implement crash-safe read path (scan manifest → open latest root).
-  - [x] Unit test: basic insert/read/delete, durability after crash simulation.
+- WASP-backed Engine::with_wasp(path) is the default entrypoint for programmatic use.
+- Initializes _tempDocuments; preloads ephemeral docs from storage.
+- Persists and reloads index metadata; see index module.
 
-- [x] Phase 2: Tiny WAL Layer
-  - [x] Design WAL record format: {txn id, page ids, checksums, new root id, epoch}.
-  - [x] Add WAL append + fdatasync logic.
-  - [x] Implement group commit batching.
-  - [x] Integrate WAL into commit path (before manifest flip).
-  - [x] Recovery logic: read manifest, replay WAL to finish incomplete CoW updates.
-  - [x] Stress test: power-fail injection during updates. (basic test via append/recover)
+### Query (src/query)
 
-- [x] Phase 3: Immutable Segment Store
-  - [x] Define segment file format (sorted key ranges, fence keys, bloom filters).
-  - [x] Add logic to seal cold data into segments (CoW → segment flush).
-  - [x] Implement read path that merges CoW + segments.
-  - [x] Add bloom filter acceleration for segment lookups.
-  - [x] Unit test: query workload across mixed hot/cold data.
+- Typed filters/operators; projection, multi-key sort, pagination.
+- Updates: $set, $inc, $unset; FindOptions supports timeouts.
+- Telemetry lives under query::telemetry and is re-exported at crate root.
 
-- [x] Phase 4: Compaction & Space Reclaim
-  - [x] Implement background compaction engine (leveled or tiered).
-  - [x] Add token-bucket throttling to cap IO usage. (future)
-  - [x] Integrate with free space map to recycle old pages/segments.
-  - [x] Add epoch-based GC for safe cleanup of obsolete data.
-  - [x] Stress test: long-running workload without space leaks.
+### Import/Export (src/import, src/export)
 
-- [x] Phase 5: Concurrency & MVCC
-  - [x] Add epoch-based snapshot tracking for readers.
-  - [x] Implement MVCC visibility rules (readers see stable snapshot, writers advance epochs).
-  - [x] Optimize for multiple concurrent readers, single writer (common embedded pattern).
-  - [x] Benchmark concurrent read-write workloads. (future)
+- Streaming NDJSON/CSV/BSON with auto-detect and per-format options.
+- Export supports filter, limit, and redaction of top-level fields.
 
-- [x] Phase 6: Durability & Integrity Hardening
-  - [x] Add end-to-end checksums (pages, WAL, manifest, segments).
-  - [x] Add torn-write protection (length-prefixed records, double-write slots).
-  - [x] Optionally support copy-verify (read-after-write) for non-power-safe devices. (future)
-  - [x] Build consistency checker tool (fsck-style).
-  - [x] Fuzz test: corrupt WAL/pages/manifest, ensure graceful recovery.
+### Recovery (src/recovery)
 
-- [x] Phase 7: Performance & Productionization
-  - [x] Implement block cache for hot pages/segments.
-  - [x] Add prefetch/pipelining for sequential scans.
-  - [x] Optimize manifest updates (batch multiple commits per flip).
-  - [x] Add statistics & metrics (WAL usage, compaction debt, cache hit ratio).
-  - [x] Benchmark against baseline DBs (SQLite WAL, LMDB, RocksDB).
+- High-level helpers: recovery::recover::{verify_manifests, repair_manifests, fuzz_corruption_check}.
+- WASP internals re-exported under recovery::wasp::*.
 
-- [x] Implement collection snapshots. (stub)
-- [x] Store the database in a **single file** (like SQLite) with a separate file for the WASP engine (`{db_name}.wasp` file).
-- [x] Implement a periodic, configurable **checkpointing process** to merge the WASP into the main database file.
-- [x] Perform tests and then troubleshoot and fix any issues.
-- [x] Update Developer Documentation (Project_Development.md).
+### Crypto (src/crypto)
+
+- ECDSA P-256 sign/verify; ECDH(P-256)+AES-256-GCM file encryption; PBE helpers.
+- PQC planned behind runtime flag crypto-pqc (stub only).
+
+## Development Workflow
+
+1. Create a feature branch off main.
+2. Make focused commits; prefer small, tested changes.
+3. Run tests locally (cargo test). For regex-related tests, enable the regex feature.
+4. Update docs when public APIs change (README, module docs, this file if relevant).
+5. Open a PR; CI runs lint, tests, fuzz smoke, and security checks.
+
+## Troubleshooting
+
+- Windows rename contention: exports/checkpoints use retries; ensure AV/indexers aren’t locking files.
+- Snapshot decode errors: see README “Snapshot format and versioning”.
+- PBE open: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD in non-interactive environments.
+
+## Security & Supply Chain
+
+- Unsafe Rust is forbidden (#![forbid(unsafe_code)]).
+- CI runs cargo audit and cargo deny with the repo’s deny.toml.
+- Prefer environment variables for secrets; logs redact secret-like keys.
+
+## Documenting Changes
+
+- Keep README aligned with code: ensure examples compile against current public API.
+- Keep this doc focused on contributor workflow; planning lives in Project_Roadmap.md.
 
 ### Sprint 4 - Import & Export Features
 
@@ -426,6 +366,55 @@ cargo clippy -q --all-targets --all-features -- -D warnings -W clippy::pedantic 
   - Supply-chain checks are wired in CI (`cargo-audit`/`cargo-deny`); local runs are optional if the tools are installed.
 
 - Run per-module tests and checks with `cargo fmt`, `cargo clippy`
+
+---
+
+## Testing and QA
+
+This project has three test suites:
+
+- Integration tests (automated): lives under `tests/integration_tests/`
+- Property tests (automated): lives under `tests/prop_tests/`
+- Interactive tests (manual): lives under `tests/interactive/` and are ignored by default
+
+Automated suites can be run directly with Cargo (no shell wrappers):
+
+- Integration tests: `cargo test -q --test integration_tests`
+- Property tests: `cargo test -q --test prop_tests`
+- All (aggregator): `cargo test -q --test all`
+
+Cargo aliases (for convenience):
+
+- Unit tests (colocated in src via `#[cfg(test)]`): `cargo unit-tests`
+- Integration tests: `cargo integration-tests`
+- Property tests: `cargo prop-tests`
+
+### Interactive tests (manual)
+
+Interactive tests validate real TTY prompts for opening an encrypted database via the `nexuslite` binary. They are intentionally marked `#[ignore]` and will only run correctly in a real terminal (TTY). When executed in a non-TTY (e.g., CI or VS Code’s default test runner), these tests will detect the lack of a TTY and skip.
+
+How to run from a separate terminal:
+
+1. Open a real terminal window (PowerShell, Windows Terminal, cmd).
+1. From the project root, run: `cargo test --test interactive -- --ignored --nocapture`
+1. Follow the on-screen prompts. For the “correct credentials” test, use:
+
+- Username: `admin`
+- Password: `password`
+
+1. The “incorrect credentials” test will ask you to enter random short credentials; it should fail as expected.
+
+Notes
+
+- The CLI prompts only when stdin is a TTY. Programmatic API paths are non-interactive and require credentials via environment when opening encrypted DBs.
+- For programmatic/non-interactive opens (used in automated tests), set `NEXUSLITE_USERNAME` and `NEXUSLITE_PASSWORD` environment variables before invoking the relevant command or API.
+- The interactive tests spawn the `nexuslite` binary with inherited stdio and will skip automatically if a TTY is not detected.
+
+- [ ] Unit tests
+  - [ ] Colocate unit tests with source modules using `#[cfg(test)]` (e.g., `src/<module>/...` with `mod tests`)
+  - [ ] Add a small test-only support module for temp dirs and file helpers
+  - [ ] Cover core modules: utils, query (parse/eval/exec), api, crypto, import/export
+  - [ ] Ensure unit tests run via `cargo unit-tests` (alias for `cargo test --lib`) and are included in CI
 
 - [ ] Docs
   - [ ] Ensure that the codebase is properly documented as per Rust coding standards and best practices.
