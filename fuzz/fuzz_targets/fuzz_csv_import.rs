@@ -4,7 +4,7 @@ use std::io::Cursor;
 
 fuzz_target!(|data: &[u8]| {
     if data.len() > 16384 { return; }
-    let engine = match nexus_lite::engine::Engine::new(std::env::temp_dir().join("fuzz_csv_wal.log")) { Ok(e) => e, Err(_) => return };
+    let engine = match nexus_lite::engine::Engine::new(std::env::temp_dir().join("fuzz_csv.wasp")) { Ok(e) => e, Err(_) => return };
     let mut opts = nexus_lite::import::ImportOptions::default();
     opts.collection = "fuzz".into();
     opts.csv.has_headers = true;

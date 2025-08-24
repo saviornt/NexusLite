@@ -12,11 +12,7 @@ fn main() {
         }
     }
     features.sort();
-    let list = features
-        .iter()
-        .map(|s| format!("\"{s}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let list = features.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", ");
     // Define a static slice of &str representing compiled Cargo features
     let content = format!("pub static COMPILED_FEATURES: &[&str] = &[{list}];\n");
     fs::write(out.join("compiled_features.rs"), content).expect("write compiled_features.rs");

@@ -425,6 +425,8 @@ cargo clippy -q --all-targets --all-features -- -D warnings -W clippy::pedantic 
   - Property tests and the full test suite pass locally; long-running CSV inference property test remains green.
   - Supply-chain checks are wired in CI (`cargo-audit`/`cargo-deny`); local runs are optional if the tools are installed.
 
+- Run per-module tests and checks with `cargo fmt`, `cargo clippy`
+
 - [ ] Docs
   - [ ] Ensure that the codebase is properly documented as per Rust coding standards and best practices.
   - [ ] Add a "Deployment" section with guidelines for deploying the database.

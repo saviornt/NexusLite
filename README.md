@@ -7,7 +7,7 @@ NexusLite is an embedded NoSQL database engine inspired by MongoDB (document col
 - Document collections with UUID-backed documents and rich metadata (timestamps, TTL)
 - Hybrid cache with TTL-first and LRU eviction, metrics, and background sweeper
 - Streaming import/export for NDJSON/CSV/BSON with auto-detect and error sidecar
-- Pluggable storage backends: WASP (default) and WAL (for benchmarking)
+- Storage backend: WASP (default). A simple WAL exists only under benchmarks for comparison.
 - Crash consistency with checksums and atomic file operations (Windows-safe)
 - Simple, thread-safe API with parking_lot::RwLock
 
@@ -100,6 +100,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Export filters and limits:
+
+- You can pass a filter and limit at export time to constrain results and redact fields.
+- Programmatic: set `ExportOptions { filter: Some(Filter), limit: Some(N), redact_fields: Some(vec![..]), ..Default::default() }`.
+- CLI: use `--filter` (JSON), `--limit` (usize), and `--redact` (comma-separated fields).
+
+Example (CLI):
+
+```powershell
+# Export first 100 users older than 30, redacting name and email
+nexuslite export users .\users.ndjson --format ndjson --filter '{"age":{"$gt":30}}' --limit 100 --redact name,email
+```
+
 ## Logging
 
 - Database-scoped logs are written automatically to a folder named after the DB stem, e.g., for mydb.db logs go to `mydb_logs/mydb.log`.
@@ -145,6 +158,16 @@ Remediation:
 - If the `.db` snapshot is corrupted but the `.wasp` log is intact, you can remove/replace the `.db` and let a compatible build re-checkpoint from `.wasp`.
 
 ## Build and test
+
+### Recovery manager
+
+The storage and recovery code lives under `crate::storage` (WASP/WAL). A new façade `crate::recovery_manager` re-exports these modules and adds helpers in `recovery_manager::recovery`:
+
+- `verify_manifests(path: &Path) -> io::Result<ConsistencyReport>` — inspect both WASP manifest slots with diagnostics.
+- `repair_manifests(path: &Path) -> io::Result<ConsistencyReport>` — copy the newest valid manifest into the other slot.
+- `fuzz_corruption_check(path: &Path) -> io::Result<bool>` — basic corruption fuzz to validate double-slot resilience.
+
+These APIs are intended for admin/diagnostics tools and CI checks.
 
 Using Cargo:
 
@@ -261,7 +284,9 @@ nexuslite open-db .\\mydb.db --verify-sig --pubkey .\\pub.pem --sig-warn
 - Query extras: regex and timeout: `tests/mod_query_features.rs` (enable with `--features regex`)
 - Import/Export NDJSON/CSV and options: `tests/mod_import.rs`
 - Import/Export BSON roundtrip: `tests/mod_import.rs::test_import_bson_and_export_bson_roundtrip`
-- WAL append/read: `tests/mod_wal.rs`
+
+Benchmark-only WAL example lives in `benchmarks/wal.rs`.
+
 - WASP internals: CoW tree, segments, tiny WAL, checksum, torn-write: `tests/mod_wasp.rs`
 - Snapshot/Checkpoint with index descriptors: `tests/mod_snapshot.rs`
 - Paths, logging folders, DB/WASP files: `tests/mod_paths.rs`
@@ -283,11 +308,11 @@ cargo test --features regex -- --nocapture
 ```mermaid
 flowchart TD
     A[User Data <br> <i>JSON Formatted</i>] --> C[Cache <br> <i>cache.rs</i>]
-    B[Imported Data <br> <i>import.rs</i>] --> C
+  B[Imported Data <br> <i>import module</i>] --> C
     C --> D[WASP <br> <i>wasp.rs</i>]
-    D --> E[Document <br> <i>document.rs</i>] --> H[Exported Data <br> <i>export.rs</i>]
+  D --> E[Document <br> <i>document module</i>] --> H[Exported Data <br> <i>export module</i>]
     E --> F[Collection <br> <i>collection.rs</i>] --> H
-    F --> G[Database <br> <i>engine.rs</i>] --> H
+  F --> G[Database <br> <i>database module</i>] --> H
 ```
 
 ---
@@ -299,47 +324,23 @@ The following is the current project structure, subject to change:
 ```text
 NexusLite
 ├── src\
-│   ├── api.rs
-│   ├── cache.rs
-│   ├── cli.rs
-│   ├── collection.rs
-│   ├── crypto.rs
-│   ├── document.rs
-│   ├── engine.rs
-│   ├── errors.rs
-│   ├── export.rs
-│   ├── import.rs
-│   ├── index.rs
-│   ├── lib.rs
-│   ├── logger.rs
-│   ├── query.rs
-│   ├── types.rs
-│   ├── wal.rs
-│   └── wasp.rs
+│   ├── api\
+│   ├── bin\
+│   ├── cache\
+│   ├── cli\
+│   ├── collection\
+│   ├── crypto\
+│   ├── database\
+│   ├── document\
+│   ├── export\
+│   ├── import\
+│   ├── query\
+│   ├── storage\
+│   ├── utils\
+│   └── lib.rs
 ├── tests\
 │   ├── common\
-│   │   └── test_logger.rs
-│   ├── integration.rs
-│   ├── mod_api.rs
-│   ├── mod_cache.rs
-│   ├── mod_cli.rs
-│   ├── mod_collection.rs
-│   ├── mod_crypto.rs
-│   ├── mod_document.rs
-│   ├── mod_engine.rs
-│   ├── mod_errors.rs
-│   ├── mod_export.rs
-│   ├── mod_import.rs
-│   ├── mod_index.rs
-│   ├── mod_lib.rs
-│   ├── mod_paths.rs
-│   ├── mod_query.rs
-│   ├── mod_query_features.rs
-│   ├── mod_snapshot.rs
-│   ├── mod_types.rs
-│   ├── mod_wal.rs
-│   └── mod_wasp.rs
-├── .gitignore
+│   ├── mod_*.rs
 ├── Cargo.lock
 ├── Cargo.toml
 └── Project_Development.md

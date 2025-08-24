@@ -112,11 +112,13 @@ jobs:
     name: Run Tests
     needs: build-and-lint
     runs-on: ${{ matrix.os }}
+    # Full tests for push to main, schedule, or manual; skipped on pull_request (quick job handles PRs)
+    if: ${{ github.event_name != 'pull_request' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-    if: always()
+        features: [""]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -134,8 +136,68 @@ jobs:
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-test-
-      - name: Run all tests
-        run: cargo test --workspace --all-features --quiet
+      - name: Run tests (default features, include ignored)
+        run: cargo test --workspace ${{ matrix.features }} --quiet -- --ignored
+
+  run-tests-regex:
+    name: Run Tests (regex feature)
+    needs: build-and-lint
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.event_name != 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        features: ["--features regex"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target
+          key: ${{ runner.os }}-cargo-test-regex-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-regex-
+      - name: Run tests (regex feature, include ignored)
+        run: cargo test --workspace ${{ matrix.features }} --quiet -- --ignored
+
+  run-tests-quick:
+    name: Run Tests (Quick)
+    needs: build-and-lint
+    runs-on: ${{ matrix.os }}
+    # Quick path for PRs: skip slow proptests by name pattern
+    if: ${{ github.event_name == 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target
+          key: ${{ runner.os }}-cargo-test-quick-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-quick-
+      - name: Run quick tests (skip proptests and ignored)
+        run: cargo test --workspace --quiet -- --skip prop_ --skip ignored
 
   miri:
     name: Miri (UB checker)
