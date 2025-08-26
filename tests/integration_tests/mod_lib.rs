@@ -1,5 +1,5 @@
 use bson::doc;
-use nexus_lite::{
+use nexuslite::{
     Database,
     document::{Document, DocumentType},
 };
@@ -28,7 +28,7 @@ async fn test_database_operations() {
     // 5. Update the document
     let mut updated_document = document.clone();
     updated_document.data =
-        nexus_lite::types::SerializableBsonDocument(doc! { "name": "Alice", "age": 31 });
+        nexuslite::types::SerializableBsonDocument(doc! { "name": "Alice", "age": 31 });
     db.update_document(collection_name, &doc_id, updated_document.clone()).unwrap();
 
     let found_doc = collection.find_document(&doc_id).unwrap();

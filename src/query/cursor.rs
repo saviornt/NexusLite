@@ -43,5 +43,7 @@ impl Cursor {
 
 impl Iterator for Cursor {
     type Item = Document;
-    fn next(&mut self) -> Option<Self::Item> { self.advance() }
+    fn next(&mut self) -> Option<Self::Item> {
+        self.advance()
+    }
 }

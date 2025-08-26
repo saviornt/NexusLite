@@ -129,37 +129,39 @@ pub fn log_query(
     if slow {
         TELEMETRY.metrics.queries_slow_total.fetch_add(1, Ordering::Relaxed);
     }
-    if let Some(path) = cfg.query_log_path.as_ref() {
-        if cfg.structured_json {
-            let line = serde_json::json!({
-                "ts": now_ts(),
-                "db": cfg.current_db.as_deref().unwrap_or("default"),
-                "collection": collection,
-                "filter_hash": filter_hash,
-                "duration_ms": u64::try_from(duration_ms).unwrap_or(u64::MAX),
-                "limit": limit,
-                "skip": skip,
-                "user": user,
-                "slow": slow
-            })
-            .to_string();
-            write_line(path, &line);
-        } else {
-            let line = format!(
-                "ts={} db={} collection={} filter_hash={} duration_ms={} limit={:?} skip={:?} user={:?} slow={}",
-                now_ts(),
-                cfg.current_db.as_deref().unwrap_or("default"),
-                collection,
-                filter_hash,
-                duration_ms,
-                limit,
-                skip,
-                user,
-                slow
-            );
-            write_line(path, &line);
+    if crate::feature_flags::is_enabled("telemetry-adv")
+        && let Some(path) = cfg.query_log_path.as_ref()
+        {
+            if cfg.structured_json {
+                let line = serde_json::json!({
+                    "ts": now_ts(),
+                    "db": cfg.current_db.as_deref().unwrap_or("default"),
+                    "collection": collection,
+                    "filter_hash": filter_hash,
+                    "duration_ms": u64::try_from(duration_ms).unwrap_or(u64::MAX),
+                    "limit": limit,
+                    "skip": skip,
+                    "user": user,
+                    "slow": slow
+                })
+                .to_string();
+                write_line(path, &line);
+            } else {
+                let line = format!(
+                    "ts={} db={} collection={} filter_hash={} duration_ms={} limit={:?} skip={:?} user={:?} slow={}",
+                    now_ts(),
+                    cfg.current_db.as_deref().unwrap_or("default"),
+                    collection,
+                    filter_hash,
+                    duration_ms,
+                    limit,
+                    skip,
+                    user,
+                    slow
+                );
+                write_line(path, &line);
+            }
         }
-    }
 }
 
 pub fn log_audit(op: &str, collection: &str, doc_id: &str, user: Option<&str>) {
@@ -176,9 +178,11 @@ pub fn log_audit(op: &str, collection: &str, doc_id: &str, user: Option<&str>) {
     if let Some(sink) = audit_clone {
         sink.write().push(line.clone());
     }
-    let log_path = TELEMETRY.cfg.read().query_log_path.clone();
-    if let Some(path) = log_path.as_ref() {
-        write_line(path, &line);
+    if crate::feature_flags::is_enabled("telemetry-adv") {
+        let log_path = TELEMETRY.cfg.read().query_log_path.clone();
+        if let Some(path) = log_path.as_ref() {
+            write_line(path, &line);
+        }
     }
 }
 
@@ -359,7 +363,9 @@ pub fn retry_after_ms(collection: &str, n: u64) -> u64 {
                 if state.cfg.refill_per_sec <= 0.0 {
                     u64::MAX
                 } else {
-                    ((need / state.cfg.refill_per_sec) * 1000.0).ceil() as u64
+                    crate::utils::num::usize_to_u64(
+                        ((need / state.cfg.refill_per_sec) * 1000.0).ceil() as usize,
+                    )
                 }
             }
         } else {
@@ -382,17 +388,19 @@ pub fn set_default_rate_limit(capacity: u64, refill_per_sec: u64) {
 /// Log a rate-limited event for observability.
 pub fn log_rate_limited(collection: &str, op: &str) {
     TELEMETRY.metrics.rate_limited_total.fetch_add(1, Ordering::Relaxed);
-    if let Some(path) = TELEMETRY.cfg.read().query_log_path.as_ref() {
-        let line = serde_json::json!({
-            "ts": now_ts(),
-            "db": TELEMETRY.cfg.read().current_db.clone().unwrap_or_else(||"default".into()),
-            "collection": collection,
-            "op": op,
-            "rate_limited": true
-        })
-        .to_string();
-        write_line(path, &line);
-    }
+    if crate::feature_flags::is_enabled("telemetry-adv")
+        && let Some(path) = TELEMETRY.cfg.read().query_log_path.as_ref()
+        {
+            let line = serde_json::json!({
+                "ts": now_ts(),
+                "db": TELEMETRY.cfg.read().current_db.clone().unwrap_or_else(||"default".into()),
+                "collection": collection,
+                "op": op,
+                "rate_limited": true
+            })
+            .to_string();
+            write_line(path, &line);
+        }
 }
 
 fn default_bucket_cfg() -> TokenBucketCfg {
@@ -404,8 +412,10 @@ fn default_bucket_cfg() -> TokenBucketCfg {
     let cap_env = std::env::var("NEXUS_DEFAULT_RATE_CAP").ok().and_then(|s| s.parse::<u64>().ok());
     let rps_env = std::env::var("NEXUS_DEFAULT_RATE_RPS").ok().and_then(|s| s.parse::<u64>().ok());
     let cores = std::thread::available_parallelism().map(std::num::NonZeroUsize::get).unwrap_or(4);
-    let capacity = cap_env.unwrap_or_else(|| (cores as u64).saturating_mul(100).max(200));
-    let refill = rps_env.unwrap_or_else(|| (cores as u64).saturating_mul(50).max(100));
+    let capacity = cap_env
+        .unwrap_or_else(|| (crate::utils::num::usize_to_u64(cores)).saturating_mul(100).max(200));
+    let refill = rps_env
+        .unwrap_or_else(|| (crate::utils::num::usize_to_u64(cores)).saturating_mul(50).max(100));
     #[allow(clippy::cast_precision_loss)]
     let cfg = TokenBucketCfg { capacity: capacity as f64, refill_per_sec: refill as f64 };
     *TELEMETRY.default_rate.write() = Some(cfg.clone());

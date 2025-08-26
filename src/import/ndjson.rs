@@ -25,8 +25,7 @@ pub fn import_ndjson<R: Read>(
             .as_array()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "expected JSON array"))?;
         for v in arr {
-            let bdoc: BsonDocument =
-                bson::to_document(v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let bdoc: BsonDocument = crate::utils::json::json_value_to_bson_document(v)?;
             let mut d = Document::new(bdoc.clone(), doc_type);
             apply_ttl(&mut d, &bdoc, opts.ttl_field.as_deref());
             collection.insert_document(d);
@@ -54,8 +53,7 @@ pub fn import_ndjson<R: Read>(
         }
         match serde_json::from_str::<serde_json::Value>(line) {
             Ok(v) => {
-                let bdoc: BsonDocument = bson::to_document(&v)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let bdoc: BsonDocument = crate::utils::json::json_value_to_bson_document(&v)?;
                 let mut d = Document::new(bdoc.clone(), doc_type);
                 apply_ttl(&mut d, &bdoc, opts.ttl_field.as_deref());
                 collection.insert_document(d);

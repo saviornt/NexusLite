@@ -1,6 +1,6 @@
 use super::core::Collection;
 use crate::document::Document;
-use crate::index::{index_insert_all, IndexImpl, IndexKind};
+use crate::index::{IndexImpl, IndexKind, index_insert_all};
 use crate::types::DocumentId;
 
 impl Collection {

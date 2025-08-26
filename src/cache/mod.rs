@@ -1,8 +1,8 @@
 mod config;
+mod core;
 mod metrics;
 mod policy;
 mod size;
-mod core;
 
 pub use config::{CacheConfig, EvictionMode};
 pub use core::Cache;

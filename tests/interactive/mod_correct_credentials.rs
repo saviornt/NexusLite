@@ -1,6 +1,6 @@
-use tempfile::tempdir;
-use std::process::{Command, Stdio};
 use std::io::IsTerminal;
+use std::process::{Command, Stdio};
+use tempfile::tempdir;
 
 // Prompts for admin/password; run manually in a real terminal.
 #[test]
@@ -9,11 +9,11 @@ fn open_db_prompts_and_succeeds_with_correct_credentials() {
     let dir = tempdir().unwrap();
     let db_path = dir.path().join("prompt_ok.db");
     {
-        let engine = nexus_lite::engine::Engine::new(dir.path().join("ok.wasp")).unwrap();
-        let _db = nexus_lite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
-        let _ = nexus_lite::api::create_document(&engine, Some("c"), "{\"a\":1}", false, None);
+        let engine = nexuslite::engine::Engine::new(dir.path().join("ok.wasp")).unwrap();
+        let _db = nexuslite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
+        let _ = nexuslite::api::create_document(&engine, Some("c"), "{\"a\":1}", false, None);
         // Encrypt with known creds
-        nexus_lite::api::encrypt_db_with_password(db_path.as_path(), "admin", "password").unwrap();
+        nexuslite::api::encrypt_db_with_password(db_path.as_path(), "admin", "password").unwrap();
         drop(engine);
     }
     // Ensure no env creds
@@ -29,7 +29,8 @@ fn open_db_prompts_and_succeeds_with_correct_credentials() {
 
     eprintln!("Interactive test (correct): enter -> Username: admin | Password: password");
     let status = Command::new(env!("CARGO_BIN_EXE_nexuslite"))
-        .arg("open-db")
+        .arg("db")
+        .arg("open")
         .arg(db_path.to_string_lossy().to_string())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

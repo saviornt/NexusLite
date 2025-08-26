@@ -1,6 +1,6 @@
-use nexus_lite::engine::Engine;
-use nexus_lite::export::{ExportFormat, ExportOptions, export_file};
-use nexus_lite::import::{ImportFormat, ImportOptions, import_file, import_from_reader};
+use nexuslite::engine::Engine;
+use nexuslite::export::{ExportFormat, ExportOptions, export_file};
+use nexuslite::import::{ImportFormat, ImportOptions, import_file, import_from_reader};
 use std::io::{Cursor, Read};
 use tempfile::tempdir;
 
@@ -23,18 +23,18 @@ async fn test_import_ndjson_basic() {
 fn test_import_ndjson_skip_errors_behavior() {
     let dir = tempfile::tempdir().unwrap();
     let wasp = dir.path().join("imp_skip_errs.wasp");
-    let engine = nexus_lite::engine::Engine::new(wasp).unwrap();
+    let engine = nexuslite::engine::Engine::new(wasp).unwrap();
     let col = "users";
     // Two good lines and one bad JSON line in the middle
     let data = "{\"name\":\"a\"}\nnot-json\n{\"name\":\"b\"}\n";
     // skip_errors = true -> inserts 2 and skips 1
     let mut opts =
-        nexus_lite::import::ImportOptions { collection: col.into(), ..Default::default() };
+        nexuslite::import::ImportOptions { collection: col.into(), ..Default::default() };
     opts.skip_errors = true;
-    let rep = nexus_lite::import::import_from_reader(
+    let rep = nexuslite::import::import_from_reader(
         &engine,
         std::io::Cursor::new(data.as_bytes()),
-        nexus_lite::import::ImportFormat::Ndjson,
+        nexuslite::import::ImportFormat::Ndjson,
         &opts,
     )
     .unwrap();
@@ -42,12 +42,12 @@ fn test_import_ndjson_skip_errors_behavior() {
     assert_eq!(rep.skipped, 1);
     // skip_errors = false -> returns error
     let mut opts2 =
-        nexus_lite::import::ImportOptions { collection: col.into(), ..Default::default() };
+        nexuslite::import::ImportOptions { collection: col.into(), ..Default::default() };
     opts2.skip_errors = false;
-    let err = nexus_lite::import::import_from_reader(
+    let err = nexuslite::import::import_from_reader(
         &engine,
         std::io::Cursor::new(data.as_bytes()),
-        nexus_lite::import::ImportFormat::Ndjson,
+        nexuslite::import::ImportFormat::Ndjson,
         &opts2,
     )
     .err();
@@ -76,7 +76,7 @@ fn test_import_ndjson_array_mode() {
     use std::io::Write;
     let dir = tempfile::tempdir().unwrap();
     let wasp = dir.path().join("imp_array.wasp");
-    let engine = nexus_lite::engine::Engine::new(wasp).unwrap();
+    let engine = nexuslite::engine::Engine::new(wasp).unwrap();
     let col = "arr";
     let data = dir.path().join("arr.json");
     {
@@ -100,13 +100,19 @@ fn test_import_bson_and_export_bson_roundtrip() {
     use std::io::Write;
     let dir = tempfile::tempdir().unwrap();
     let wasp = dir.path().join("imp_bson.wasp");
-    let engine = nexus_lite::engine::Engine::new(wasp).unwrap();
+    let engine = nexuslite::engine::Engine::new(wasp).unwrap();
     let col = "bsoncol";
     let path = dir.path().join("in.bson");
     {
         let mut f = std::fs::File::create(&path).unwrap();
-        let d1 = bson::to_document(&serde_json::json!({"x":1})).unwrap();
-        let d2 = bson::to_document(&serde_json::json!({"x":2})).unwrap();
+        let d1 = {
+            let v = serde_json::json!({"x":1});
+            nexuslite::utils::json::json_value_to_bson_document(&v).unwrap()
+        };
+        let d2 = {
+            let v = serde_json::json!({"x":2});
+            nexuslite::utils::json::json_value_to_bson_document(&v).unwrap()
+        };
         let mut b1 = Vec::new();
         d1.to_writer(&mut b1).unwrap();
         let mut b2 = Vec::new();
@@ -149,7 +155,7 @@ fn test_import_csv_type_infer() {
     use std::io::Write;
     let dir = tempfile::tempdir().unwrap();
     let wasp = dir.path().join("imp_csv.wasp");
-    let engine = nexus_lite::engine::Engine::new(wasp).unwrap();
+    let engine = nexuslite::engine::Engine::new(wasp).unwrap();
     let col = "csv";
     let csvp = dir.path().join("data.csv");
     {

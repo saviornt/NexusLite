@@ -1,5 +1,5 @@
-use nexus_lite::cli::{Command, run};
-use nexus_lite::engine::Engine;
+use nexuslite::cli::{Command, run};
+use nexuslite::engine::Engine;
 use std::io::Write;
 use tempfile::tempdir;
 
@@ -11,16 +11,16 @@ fn test_verify_db_signatures_flow() {
 
     // Create a DB and write some content to .db
     let db_path = dir.path().join("v.db");
-    let db = nexus_lite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
+    let db = nexuslite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
     let _ = db.create_collection("c1");
 
     // Generate keys via API
-    let (priv_pem, pub_pem) = nexus_lite::api::crypto_generate_p256();
+    let (priv_pem, pub_pem) = nexuslite::api::crypto_generate_p256();
 
     // Sign the .db and .wasp
-    let db_sig = nexus_lite::api::crypto_sign_file(&priv_pem, &db_path).unwrap();
+    let db_sig = nexuslite::api::crypto_sign_file(&priv_pem, &db_path).unwrap();
     let wasp_path = db_path.with_extension("wasp");
-    let wasp_sig = nexus_lite::api::crypto_sign_file(&priv_pem, &wasp_path).unwrap();
+    let wasp_sig = nexuslite::api::crypto_sign_file(&priv_pem, &wasp_path).unwrap();
 
     // Write sig files
     std::fs::write(db_path.with_extension("db.sig"), &db_sig).unwrap();
@@ -53,17 +53,17 @@ fn verify_db_signatures_with_wrong_pubkey_fails() {
 
     // Create a DB and write some content
     let db_path = dir.path().join("v2.db");
-    let db = nexus_lite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
+    let db = nexuslite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
     let _ = db.create_collection("c1");
 
     // Keypair A to sign, Keypair B to verify (mismatch)
-    let (priv_a, _pub_a) = nexus_lite::api::crypto_generate_p256();
-    let (_priv_b, pub_b) = nexus_lite::api::crypto_generate_p256();
+    let (priv_a, _pub_a) = nexuslite::api::crypto_generate_p256();
+    let (_priv_b, pub_b) = nexuslite::api::crypto_generate_p256();
 
     // Sign files with A
-    let db_sig = nexus_lite::api::crypto_sign_file(&priv_a, &db_path).unwrap();
+    let db_sig = nexuslite::api::crypto_sign_file(&priv_a, &db_path).unwrap();
     let wasp_path = db_path.with_extension("wasp");
-    let wasp_sig = nexus_lite::api::crypto_sign_file(&priv_a, &wasp_path).unwrap();
+    let wasp_sig = nexuslite::api::crypto_sign_file(&priv_a, &wasp_path).unwrap();
     std::fs::write(db_path.with_extension("db.sig"), &db_sig).unwrap();
     std::fs::write(wasp_path.with_extension("wasp.sig"), &wasp_sig).unwrap();
 

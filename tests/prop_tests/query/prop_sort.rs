@@ -1,5 +1,5 @@
-use nexus_lite::document::{Document, DocumentType};
-use nexus_lite::query::{FindOptions, Order, SortSpec};
+use nexuslite::document::{Document, DocumentType};
+use nexuslite::query::{FindOptions, Order, SortSpec};
 use proptest::prelude::*;
 
 proptest! {
@@ -14,8 +14,9 @@ proptest! {
     #[test]
     #[ignore = "slow on CI; run in scheduled full builds"]
     fn prop_multi_key_sort_non_decreasing(v in proptest::collection::vec((any::<i64>(), any::<i64>()), 0..15)) {
-        use nexus_lite::engine::Engine;
-    let engine = Engine::new(std::env::temp_dir().join("prop_sort.wasp")).unwrap();
+    use nexuslite::engine::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::new(dir.path().join("prop_sort.wasp")).unwrap();
         let col = engine.create_collection("srt".into());
         for (a,b) in &v {
             let d = Document::new(bson::doc!{"a": *a, "b": *b}, DocumentType::Persistent);
@@ -28,7 +29,7 @@ proptest! {
             skip: None,
             timeout_ms: None
         };
-    let cur = nexus_lite::query::find_docs(&col, &nexus_lite::query::Filter::True, &opts);
+    let cur = nexuslite::query::find_docs(&col, &nexuslite::query::Filter::True, &opts);
         let docs = cur.to_vec();
         // Check non-decreasing (lexicographic) by (a,b)
         for w in docs.windows(2) {

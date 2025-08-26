@@ -1,7 +1,7 @@
 use bson::{Bson, Document as BsonDocument};
 use std::cmp::Ordering;
 
-use super::types::{Filter, CmpOp, MAX_IN_SET, MAX_PATH_DEPTH, MAX_SORT_FIELDS, SortSpec};
+use super::types::{CmpOp, Filter, MAX_IN_SET, MAX_PATH_DEPTH, MAX_SORT_FIELDS, SortSpec};
 
 pub fn eval_filter(doc: &BsonDocument, filter: &Filter) -> bool {
     match filter {
@@ -27,7 +27,9 @@ pub fn eval_filter(doc: &BsonDocument, filter: &Filter) -> bool {
                         c == Ordering::Less || c == Ordering::Equal
                     }
                 }
-            } else { false }
+            } else {
+                false
+            }
         }
         #[cfg(feature = "regex")]
         Filter::Regex { path, pattern, case_insensitive } => {
@@ -35,7 +37,9 @@ pub fn eval_filter(doc: &BsonDocument, filter: &Filter) -> bool {
                 let mut re = regex::RegexBuilder::new(pattern);
                 re.case_insensitive(*case_insensitive);
                 if let Ok(r) = re.build() { r.is_match(s) } else { false }
-            } else { false }
+            } else {
+                false
+            }
         }
     }
 }
@@ -57,17 +61,23 @@ pub fn compare_docs(a: &BsonDocument, b: &BsonDocument, sort: &[SortSpec]) -> Or
     Ordering::Equal
 }
 
-fn is_in_set(v: &Bson, set: &[Bson]) -> bool { set.iter().take(MAX_IN_SET).any(|x| x == v) }
+fn is_in_set(v: &Bson, set: &[Bson]) -> bool {
+    set.iter().take(MAX_IN_SET).any(|x| x == v)
+}
 
 fn get_path<'a>(doc: &'a BsonDocument, path: &str) -> Option<&'a Bson> {
-    if path.is_empty() || path.len() > 1024 { return None; }
+    if path.is_empty() || path.len() > 1024 {
+        return None;
+    }
     let mut cur = doc;
     let mut segs = 0usize;
     let parts = path.split('.');
     let last = parts.clone().next_back().unwrap_or("");
     for part in parts {
         segs += 1;
-        if segs > MAX_PATH_DEPTH { return None; }
+        if segs > MAX_PATH_DEPTH {
+            return None;
+        }
         match cur.get(part) {
             Some(Bson::Document(d)) => cur = d,
             Some(v) if part == last => return Some(v),
@@ -79,7 +89,9 @@ fn get_path<'a>(doc: &'a BsonDocument, path: &str) -> Option<&'a Bson> {
 
 pub fn compare_bson(a: &Bson, b: &Bson) -> Ordering {
     use bson::Bson as T;
-    fn is_num(x: &T) -> bool { matches!(x, T::Int32(_) | T::Int64(_) | T::Double(_) | T::Decimal128(_)) }
+    fn is_num(x: &T) -> bool {
+        matches!(x, T::Int32(_) | T::Int64(_) | T::Double(_) | T::Decimal128(_))
+    }
     fn as_f64_num(x: &T) -> f64 {
         match x {
             T::Int32(i) => *i as f64,
@@ -89,7 +101,9 @@ pub fn compare_bson(a: &Bson, b: &Bson) -> Ordering {
             _ => f64::NAN,
         }
     }
-    if is_num(a) && is_num(b) { return as_f64_num(a).total_cmp(&as_f64_num(b)); }
+    if is_num(a) && is_num(b) {
+        return as_f64_num(a).total_cmp(&as_f64_num(b));
+    }
     match (a, b) {
         (T::String(x), T::String(y)) => x.cmp(y),
         (T::Boolean(x), T::Boolean(y)) => x.cmp(y),
@@ -126,6 +140,10 @@ fn type_rank(v: &Bson) -> u8 {
 
 pub fn project_fields(doc: &BsonDocument, fields: &[String]) -> BsonDocument {
     let mut out = BsonDocument::new();
-    for f in fields { if let Some(v) = doc.get(f) { out.insert(f.clone(), v.clone()); } }
+    for f in fields {
+        if let Some(v) = doc.get(f) {
+            out.insert(f.clone(), v.clone());
+        }
+    }
     out
 }

@@ -1,5 +1,5 @@
 // Engine tests for database module scope (mirrors src/database/engine.rs)
-use nexus_lite::engine::Engine;
+use nexuslite::engine::Engine;
 use tempfile::tempdir;
 
 #[tokio::test]

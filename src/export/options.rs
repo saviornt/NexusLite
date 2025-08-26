@@ -13,7 +13,9 @@ pub struct CsvOptions {
     pub write_headers: bool,
 }
 impl Default for CsvOptions {
-    fn default() -> Self { Self { delimiter: b',', write_headers: true } }
+    fn default() -> Self {
+        Self { delimiter: b',', write_headers: true }
+    }
 }
 
 #[derive(Debug, Clone)]

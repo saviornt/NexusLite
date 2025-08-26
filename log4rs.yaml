@@ -7,6 +7,18 @@ appenders:
     path: "log/requests.log"
     encoder:
       pattern: "{d} - {m}{n}"
+  # Optional dev6 appender for developer-level diagnostics
+  dev6:
+    kind: file
+    path: "log/dev6.log"
+    encoder:
+      pattern: "{d} [DEV6] {m}{n}"
+
+loggers:
+  nexuslite::dev6:
+    level: trace
+    appenders:
+      - dev6
 
 root:
   level: info

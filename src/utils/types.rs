@@ -29,7 +29,7 @@ pub struct SerializableBsonDocument(pub BsonDocument);
 
 impl Serialize for SerializableBsonDocument {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let bytes = bson::to_vec(&self.0).map_err(serde::ser::Error::custom)?;
+        let bytes = self.0.to_vec().map_err(serde::ser::Error::custom)?;
         serializer.serialize_bytes(&bytes)
     }
 }
@@ -37,7 +37,8 @@ impl Serialize for SerializableBsonDocument {
 impl<'de> Deserialize<'de> for SerializableBsonDocument {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let bytes: Vec<u8> = <Vec<u8>>::deserialize(deserializer)?;
-        let doc = bson::from_slice(&bytes).map_err(serde::de::Error::custom)?;
+        let doc = bson::Document::from_reader(&mut std::io::Cursor::new(bytes))
+            .map_err(serde::de::Error::custom)?;
         Ok(Self(doc))
     }
 }
@@ -60,7 +61,6 @@ impl<'de> Deserialize<'de> for SerializableDateTime {
         Ok(Self(dt))
     }
 }
-
 
 /// Represents operations that can be logged in the WAL.
 #[derive(Serialize, Deserialize, Debug, Clone)]

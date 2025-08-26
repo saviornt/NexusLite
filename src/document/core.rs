@@ -1,8 +1,8 @@
+use crate::document::types::{DocumentType, Metadata};
 use crate::types::{DocumentId, SerializableBsonDocument, SerializableDateTime};
 use bson::Document as BsonDocument;
-use serde::{Deserialize, Serialize};
-use crate::document::types::{DocumentType, Metadata};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

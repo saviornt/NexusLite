@@ -1,7 +1,7 @@
 use bson::doc;
-use nexus_lite::document::{Document, DocumentType};
-use nexus_lite::engine::Engine;
-use nexus_lite::query::{self, CmpOp, Filter, FindOptions};
+use nexuslite::document::{Document, DocumentType};
+use nexuslite::engine::Engine;
+use nexuslite::query::{self, CmpOp, Filter, FindOptions};
 
 #[test]
 #[cfg(feature = "regex")]

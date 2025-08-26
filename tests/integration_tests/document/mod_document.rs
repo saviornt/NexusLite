@@ -1,6 +1,6 @@
 use bson::doc;
-use nexus_lite::document::{Document, DocumentType};
-use nexus_lite::types::SerializableBsonDocument;
+use nexuslite::document::{Document, DocumentType};
+use nexuslite::types::SerializableBsonDocument;
 use std::thread::sleep;
 use std::time::Duration;
 

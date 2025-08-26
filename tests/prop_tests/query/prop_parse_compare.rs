@@ -1,5 +1,5 @@
 use bson::Bson;
-use nexus_lite::query::{parse_filter_json, Filter, CmpOp, eval_filter};
+use nexuslite::query::{CmpOp, Filter, eval_filter, parse_filter_json};
 use proptest::prelude::*;
 
 fn bump_numeric(b: Bson) -> Bson {
@@ -60,13 +60,16 @@ fn any_bson_number() -> impl Strategy<Value = Bson> {
 }
 
 fn to_json_number(b: &Bson) -> String {
-
-// helper bump_numeric is defined above
+    // helper bump_numeric is defined above
     match b {
         Bson::Int32(i) => i.to_string(),
         Bson::Int64(i) => i.to_string(),
         Bson::Double(f) => {
-            if f.is_finite() { format!("{}", f) } else { "0".into() }
+            if f.is_finite() {
+                format!("{}", f)
+            } else {
+                "0".into()
+            }
         }
         _ => "0".into(),
     }

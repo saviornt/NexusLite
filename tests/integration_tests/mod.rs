@@ -1,4 +1,5 @@
 // Aggregates per-module test suites under module_tests/*
+mod _support;
 mod api;
 mod cache;
 mod cli;
@@ -11,7 +12,6 @@ mod import;
 mod query;
 mod recovery;
 mod utils;
-mod _support;
 
 #[path = "mod_lib.rs"]
 mod lib_tests;

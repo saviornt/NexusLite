@@ -1,7 +1,7 @@
 use bson::doc;
-use nexus_lite::document::{Document, DocumentType};
-use nexus_lite::types::Operation;
-use nexus_lite::wasp::{
+use nexuslite::document::{Document, DocumentType};
+use nexuslite::types::Operation;
+use nexuslite::wasp::{
     CowTree, Manifest, Page, SegmentFile, SegmentFooter, StorageEngine, TinyWal, WalRecord, Wasp,
     WaspFile,
 };
@@ -174,7 +174,7 @@ fn test_wasp_checkpoint() {
 
 #[test]
 fn manifest_corruption_and_recovery() {
-    use nexus_lite::wasp::{ConsistencyChecker, WASP_PAGE_SIZE, WaspFile};
+    use nexuslite::wasp::{ConsistencyChecker, WASP_PAGE_SIZE, WaspFile};
     use std::io::{Read, Seek, SeekFrom, Write};
     let dir = tempdir().unwrap();
     let path = dir.path().join("corrupt_recover.wasp");
@@ -268,8 +268,121 @@ fn test_tinywal_append_and_recover() {
 }
 
 #[test]
+fn test_tinywal_truncated_tail_graceful() {
+    let dir = tempdir().unwrap();
+    let wal_path = dir.path().join("truncated_tail.bin");
+    let mut wal = TinyWal::open(wal_path.clone()).unwrap();
+    let rec = WalRecord { txn_id: 7, page_ids: vec![7], checksums: vec![7], new_root_id: 7, epoch: 7 };
+    wal.append(&rec).unwrap();
+    // Append only 4 bytes of the next length header to simulate a torn write
+    {
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&wal_path).unwrap();
+        use std::io::Seek;
+        f.seek(SeekFrom::End(0)).unwrap();
+        f.write_all(&1234u32.to_le_bytes()).unwrap();
+        f.flush().unwrap();
+    }
+    let records = wal.read_all().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].txn_id, 7);
+}
+
+#[test]
+fn test_tinywal_oversized_length_ignored() {
+    let dir = tempdir().unwrap();
+    let wal_path = dir.path().join("oversized_len.bin");
+    let mut wal = TinyWal::open(wal_path.clone()).unwrap();
+    let rec = WalRecord { txn_id: 9, page_ids: vec![9], checksums: vec![9], new_root_id: 9, epoch: 9 };
+    wal.append(&rec).unwrap();
+    // Append an 8-byte length that cannot convert to usize (u64::MAX)
+    {
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&wal_path).unwrap();
+        use std::io::Seek;
+        f.seek(SeekFrom::End(0)).unwrap();
+        f.write_all(&u64::MAX.to_le_bytes()).unwrap();
+        // Add a few junk bytes after the oversized length
+        f.write_all(&[0u8; 16]).unwrap();
+        f.flush().unwrap();
+    }
+    let records = wal.read_all().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].txn_id, 9);
+}
+
+#[test]
+fn test_tinywal_decode_error_returns_error() {
+    let dir = tempdir().unwrap();
+    let wal_path = dir.path().join("decode_error.bin");
+    let mut wal = TinyWal::open(wal_path.clone()).unwrap();
+    let rec = WalRecord { txn_id: 11, page_ids: vec![11], checksums: vec![11], new_root_id: 11, epoch: 11 };
+    wal.append(&rec).unwrap();
+    // Append a plausible small length followed by invalid bytes, causing decode to fail
+    {
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&wal_path).unwrap();
+        use std::io::Seek;
+        f.seek(SeekFrom::End(0)).unwrap();
+        let bad_len: u64 = 5;
+        f.write_all(&bad_len.to_le_bytes()).unwrap();
+        f.write_all(&[0xFF, 0xEE, 0xDD, 0xCC, 0xBB]).unwrap();
+        f.flush().unwrap();
+    }
+    let err = wal.read_all().unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn test_recover_manifests_copies_from_valid_when_other_corrupted() {
+    use nexuslite::wasp::{recover_manifests, WASP_PAGE_SIZE};
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("recover_corrupted_slot.wasp");
+    // Initialize with valid manifest in both slots
+    let mut wf = WaspFile::open(path.clone()).unwrap();
+    let mut man = Manifest::new();
+    man.version = 3;
+    wf.write_manifest(&man).unwrap();
+    // Corrupt slot 0 with junk
+    {
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        f.seek(SeekFrom::Start(0)).unwrap();
+        f.write_all(&vec![0xAA; WASP_PAGE_SIZE]).unwrap();
+        f.flush().unwrap();
+    }
+    // Recover should copy from slot 1 (valid) into slot 0
+    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+    let report = recover_manifests(&mut f).unwrap();
+    assert!(report.both_valid);
+    assert_eq!(report.slots[0].version, report.slots[1].version);
+}
+
+#[test]
+fn test_recover_manifests_error_when_both_invalid() {
+    use nexuslite::wasp::{recover_manifests, WASP_PAGE_SIZE};
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("recover_both_invalid.wasp");
+    // Create file and write junk into both slots
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        // Ensure size for both slots
+        f.seek(SeekFrom::Start((2 * WASP_PAGE_SIZE) as u64)).unwrap();
+        f.write_all(&[0]).unwrap();
+        f.seek(SeekFrom::Start(0)).unwrap();
+        f.write_all(&vec![0x55; 2 * WASP_PAGE_SIZE]).unwrap();
+        f.flush().unwrap();
+    }
+    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+    let err = recover_manifests(&mut f).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[test]
 fn test_page_checksum_verification() {
-    use nexus_lite::wasp::verify_page_checksum;
+    use nexuslite::wasp::verify_page_checksum;
     let mut p = Page::new(1, 1, 2, b"hello".to_vec());
     assert!(verify_page_checksum(&p));
     // Corrupt data
@@ -279,7 +392,7 @@ fn test_page_checksum_verification() {
 
 #[test]
 fn test_torn_write_protect_roundtrip() {
-    use nexus_lite::wasp::torn_write_protect;
+    use nexuslite::wasp::torn_write_protect;
     let dir = tempdir().unwrap();
     let path = dir.path().join("torn.bin");
     let mut f = std::fs::OpenOptions::new()
@@ -302,7 +415,7 @@ fn test_torn_write_protect_roundtrip() {
 
 #[test]
 fn test_recover_manifests_copies_newest_slot() {
-    use nexus_lite::wasp::{WASP_PAGE_SIZE, recover_manifests};
+    use nexuslite::wasp::{WASP_PAGE_SIZE, recover_manifests};
     let dir = tempdir().unwrap();
     let path = dir.path().join("recover_slots.wasp");
     // Initialize with valid manifest in both slots

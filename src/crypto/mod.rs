@@ -10,12 +10,10 @@ pub mod signature_verification;
 
 // Keep original public API via re-exports
 pub use file_encryption::{
-    decrypt_file_p256, encrypt_file_p256, pbe_decrypt_file, pbe_encrypt_file, pbe_is_encrypted,
-    PbeKdfParams,
+    PbeKdfParams, decrypt_file_p256, encrypt_file_p256, pbe_decrypt_file, pbe_encrypt_file,
+    pbe_is_encrypted,
 };
-pub use signature_verification::{
-    generate_p256_keypair_pem, sign_file_p256, verify_file_p256,
-};
+pub use signature_verification::{generate_p256_keypair_pem, sign_file_p256, verify_file_p256};
 
 // Secret-field hashing via hash_secrets module
 pub mod hash_secrets;

@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 
-use super::options::{ExportOptions, ExportReport, ExportFormat};
+use super::options::{ExportFormat, ExportOptions, ExportReport};
 use super::sinks::{BsonSink, CsvSink, DocSink, NdjsonSink};
 
 /// Export a collection to a file atomically via a temp file + persist.
@@ -80,21 +80,32 @@ fn export_into_writer<W: Write>(
     // Build sink for formatting/IO
     let mut sink: Box<dyn DocSink> = match opts.format {
         ExportFormat::Ndjson => Box::new(NdjsonSink::new(writer)),
-        ExportFormat::Csv => Box::new(CsvSink::new(writer, opts.csv.delimiter, opts.csv.write_headers)),
+        ExportFormat::Csv => {
+            Box::new(CsvSink::new(writer, opts.csv.delimiter, opts.csv.write_headers))
+        }
         ExportFormat::Bson => Box::new(BsonSink::new(writer)),
     };
 
     // Selection + transformation pipeline
     let mut remaining = opts.limit.unwrap_or(usize::MAX);
     let matches_filter = |doc: &bson::Document| -> bool {
-        match &opts.filter { Some(f) => query::eval_filter(doc, f), None => true }
+        match &opts.filter {
+            Some(f) => query::eval_filter(doc, f),
+            None => true,
+        }
     };
     for id in col.list_ids() {
-        if remaining == 0 { break; }
+        if remaining == 0 {
+            break;
+        }
         if let Some(d) = col.find_document(&id) {
             let mut doc = d.data.0.clone();
-            if !matches_filter(&doc) { continue; }
-            if let Some(fields) = redact { apply_redaction(&mut doc, fields); }
+            if !matches_filter(&doc) {
+                continue;
+            }
+            if let Some(fields) = redact {
+                apply_redaction(&mut doc, fields);
+            }
             sink.write_doc(&doc)?;
             report.written += 1;
             remaining = remaining.saturating_sub(1);

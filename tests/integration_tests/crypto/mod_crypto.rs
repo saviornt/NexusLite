@@ -1,30 +1,30 @@
-use nexus_lite::cli::{Command, run};
-use nexus_lite::engine::Engine;
+use nexuslite::cli::{Command, run};
+use nexuslite::engine::Engine;
 use std::fs;
 
 #[test]
 fn p256_keygen_sign_verify_roundtrip() {
-    let (priv_pem, pub_pem) = nexus_lite::crypto::generate_p256_keypair_pem();
+    let (priv_pem, pub_pem) = nexuslite::crypto::generate_p256_keypair_pem();
     let dir = tempfile::tempdir().unwrap();
     let msg_path = dir.path().join("msg.bin");
     fs::write(&msg_path, b"hello world").unwrap();
-    let sig = nexus_lite::crypto::sign_file_p256(&priv_pem, &msg_path).unwrap();
-    let ok = nexus_lite::crypto::verify_file_p256(&pub_pem, &msg_path, &sig).unwrap();
+    let sig = nexuslite::crypto::sign_file_p256(&priv_pem, &msg_path).unwrap();
+    let ok = nexuslite::crypto::verify_file_p256(&pub_pem, &msg_path, &sig).unwrap();
     assert!(ok);
 }
 
 #[test]
 fn p256_verify_rejects_tampered_signature() {
-    let (priv_pem, pub_pem) = nexus_lite::crypto::generate_p256_keypair_pem();
+    let (priv_pem, pub_pem) = nexuslite::crypto::generate_p256_keypair_pem();
     let dir = tempfile::tempdir().unwrap();
     let msg_path = dir.path().join("msg.bin");
     fs::write(&msg_path, b"hello world").unwrap();
-    let mut sig = nexus_lite::crypto::sign_file_p256(&priv_pem, &msg_path).unwrap();
+    let mut sig = nexuslite::crypto::sign_file_p256(&priv_pem, &msg_path).unwrap();
     // Flip a bit in the signature to corrupt it
     if let Some(b) = sig.get_mut(0) {
         *b ^= 0b0000_0001;
     }
-    match nexus_lite::crypto::verify_file_p256(&pub_pem, &msg_path, &sig) {
+    match nexuslite::crypto::verify_file_p256(&pub_pem, &msg_path, &sig) {
         Ok(false) => {}
         Ok(true) => panic!("expected verification failure for tampered signature"),
         Err(_) => {}
@@ -33,14 +33,14 @@ fn p256_verify_rejects_tampered_signature() {
 
 #[test]
 fn p256_encrypt_decrypt_roundtrip() {
-    let (priv_pem, pub_pem) = nexus_lite::crypto::generate_p256_keypair_pem();
+    let (priv_pem, pub_pem) = nexuslite::crypto::generate_p256_keypair_pem();
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("plain.txt");
     let enc = dir.path().join("enc.bin");
     let out = dir.path().join("out.txt");
     fs::write(&src, b"secret data").unwrap();
-    nexus_lite::crypto::encrypt_file_p256(&pub_pem, &src, &enc).unwrap();
-    nexus_lite::crypto::decrypt_file_p256(&priv_pem, &enc, &out).unwrap();
+    nexuslite::crypto::encrypt_file_p256(&pub_pem, &src, &enc).unwrap();
+    nexuslite::crypto::decrypt_file_p256(&priv_pem, &enc, &out).unwrap();
     let out_bytes = fs::read(&out).unwrap();
     assert_eq!(out_bytes, b"secret data");
 }
@@ -110,7 +110,7 @@ fn cli_encrypted_checkpoint_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("mydb.db");
     // Create/open DB via API
-    let db = nexus_lite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
+    let db = nexuslite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
     let _ = db.create_collection("users");
     drop(db);
     let engine = Engine::new(dir.path().join("crypto2.wasp")).unwrap();
@@ -149,6 +149,6 @@ fn cli_encrypted_checkpoint_roundtrip() {
 #[test]
 fn hash_secret_fields_argon2() {
     let mut doc = bson::doc! { "username": "alice", "password": "p@ss" };
-    nexus_lite::crypto::hash_secret_fields(&mut doc, &["password"]).unwrap();
+    nexuslite::crypto::hash_secret_fields(&mut doc, &["password"]).unwrap();
     assert!(matches!(doc.get("password"), Some(bson::Bson::Binary(_))));
 }

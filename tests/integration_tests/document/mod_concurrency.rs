@@ -4,10 +4,11 @@ use std::thread;
 
 #[test]
 fn concurrent_insert_read_update_stress() {
-    use nexus_lite::document::{Document, DocumentType};
-    use nexus_lite::engine::Engine;
+    use nexuslite::document::{Document, DocumentType};
+    use nexuslite::engine::Engine;
 
-    let engine = Arc::new(Engine::new(std::env::temp_dir().join("concurrency.wasp")).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Arc::new(Engine::new(dir.path().join("concurrency.wasp")).unwrap());
     let col = engine.create_collection("conc".into());
 
     let threads = 4;
@@ -36,7 +37,9 @@ fn concurrent_insert_read_update_stress() {
         handles.push(handle);
     }
 
-    for h in handles { h.join().unwrap(); }
+    for h in handles {
+        h.join().unwrap();
+    }
 
     let total = threads * per_thread;
     let all = col.get_all_documents();

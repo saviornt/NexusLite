@@ -146,6 +146,14 @@ pub enum Command {
         capacity: u64,
         refill_per_sec: u64,
     },
+    // Recovery options
+    RecoveryAutoRecover {
+        enabled: bool,
+    },
+    RecoveryAutoRecoverGet,
+    RecoveryValidateResilience {
+        path: PathBuf,
+    },
     // Encrypted checkpoint/restore
     CheckpointEncrypted {
         db_path: PathBuf,
@@ -179,7 +187,26 @@ pub enum Command {
     FeatureDisable {
         name: String,
     },
-    // Feature checks/print
-    FeaturesPrint,
-    FeaturesCheck,
+    FeatureInfo {
+        name: String,
+    },
+    // Version and info
+    Version,
+    Info,
+    Check,
+    // Feature/version/info
+    // Logging config
+    LogConfig {
+        dir: Option<std::path::PathBuf>,
+        level: Option<String>,
+        retention: Option<usize>,
+    },
+    // Doctor summary payload (constructed in bin then formatted in runner)
+    DoctorSummary {
+        wasp_access: Option<(bool, String)>,
+        config_files: Vec<(String, String)>,
+        env_secret_keys: Vec<String>,
+        advice: String,
+        status: String,
+    },
 }

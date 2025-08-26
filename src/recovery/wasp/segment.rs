@@ -1,5 +1,5 @@
-use std::fs::OpenOptions;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
@@ -21,7 +21,9 @@ impl SegmentFooter {
     #[must_use]
     pub fn new(keys: &[Vec<u8>], key_range: (Vec<u8>, Vec<u8>), fence_keys: Vec<Vec<u8>>) -> Self {
         let mut bloom = BloomFilter::new(1024, 3);
-        for k in keys { bloom.insert(k); }
+        for k in keys {
+            bloom.insert(k);
+        }
         let bloom_bytes = encode_to_vec(&bloom, standard()).unwrap_or_else(|_| Vec::new());
         Self { key_range, fence_keys, bloom_filter: bloom_bytes }
     }
@@ -35,20 +37,25 @@ impl SegmentFooter {
     }
 }
 
-pub struct SegmentFile { pub file: File }
+pub struct SegmentFile {
+    pub file: File,
+}
 
 impl SegmentFile {
     pub fn open(path: PathBuf) -> io::Result<Self> {
-        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
+        let file =
+            OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
         Ok(Self { file })
     }
 
     pub fn flush_segment(&mut self, pages: &[Page], footer: &SegmentFooter) -> io::Result<()> {
         for page in pages {
-            let page_bytes = encode_to_vec(page, standard()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let page_bytes = encode_to_vec(page, standard())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             self.file.write_all(&page_bytes)?;
         }
-        let footer_bytes = encode_to_vec(footer, standard()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let footer_bytes = encode_to_vec(footer, standard())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.file.write_all(&footer_bytes)?;
         self.file.sync_data()?;
         Ok(())
@@ -62,7 +69,12 @@ impl SegmentFile {
         let mut pages = Vec::new();
         while offset + 8 < buf.len() {
             let try_page = decode_from_slice::<Page, _>(&buf[offset..], standard());
-            if let Ok((page, used)) = try_page { pages.push(page); offset += used; } else { break; }
+            if let Ok((page, used)) = try_page {
+                pages.push(page);
+                offset += used;
+            } else {
+                break;
+            }
         }
         let (footer, _) = decode_from_slice::<SegmentFooter, _>(&buf[offset..], standard())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

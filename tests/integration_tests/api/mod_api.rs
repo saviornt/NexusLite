@@ -1,9 +1,10 @@
-use nexus_lite::engine::Engine;
-use nexus_lite::{api, query};
+use nexuslite::engine::Engine;
+use nexuslite::{api, query};
 
 #[test]
 fn api_telemetry_config_and_rate_limit() {
-    let tmp = std::env::temp_dir().join("nexus_api_telemetry.wal");
+    let dir = tempfile::tempdir().unwrap();
+    let tmp = dir.path().join("nexus_api_telemetry.wal");
     let engine = Engine::new(tmp).unwrap();
     let col = engine.create_collection("tapi".to_string());
     // Set defaults via API
@@ -17,8 +18,8 @@ fn api_telemetry_config_and_rate_limit() {
     let _ = api::count(&engine, &col.name_str(), &filter).unwrap();
     let e = api::count(&engine, &col.name_str(), &filter).unwrap_err();
     match e {
-        nexus_lite::errors::DbError::RateLimited
-        | nexus_lite::errors::DbError::RateLimitedWithRetry { .. } => {}
+        nexuslite::errors::DbError::RateLimited
+        | nexuslite::errors::DbError::RateLimitedWithRetry { .. } => {}
         other => panic!("unexpected error: {other:?}"),
     }
 }

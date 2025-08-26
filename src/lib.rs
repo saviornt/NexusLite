@@ -29,10 +29,10 @@ pub use utils::feature_flags;
 pub use utils::fsutil;
 pub use utils::logger;
 // Core crate-wide types live in `types` (moved from utils::types)
-#[path = "utils/types.rs"]
-pub mod types;
 #[path = "import/mod.rs"]
 pub mod import;
+#[path = "utils/types.rs"]
+pub mod types;
 // Re-export database modules under original paths to preserve API
 pub use database::engine;
 pub use database::index;
@@ -42,8 +42,12 @@ pub mod query;
 pub mod recovery;
 
 // Telemetry now lives under query; re-export to preserve crate::telemetry
-pub use crate::query::telemetry as telemetry;
+pub use crate::query::telemetry;
 pub use recovery::wasp;
+
+// Test-only helpers
+#[cfg(test)]
+pub mod test_support;
 
 use crate::collection::Collection;
 use crate::document::Document;
@@ -84,11 +88,13 @@ impl Database {
                 .map_err(|e| DbError::Io(format!("Failed to create WASP file: {e}")))?;
         }
 
-        // Initialize logging next to DB: {db_dir}/{db_stem}_logs/{db_stem}.log
-        if let Some(stem) = db_path.file_stem().and_then(|s| s.to_str()) {
-            let base = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
-            let _ = crate::logger::init_for_db_in(base, stem);
-        }
+        // Initialize logging next to DB if enabled: {db_dir}/{db_stem}_logs/{db_stem}.log
+        if crate::feature_flags::is_enabled("db-logging")
+            && let Some(stem) = db_path.file_stem().and_then(|s| s.to_str())
+            {
+                let base = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+                let _ = crate::logger::init_for_db_in(base, stem);
+            }
 
         let engine = Engine::with_wasp(wasp_path).map_err(|e| DbError::Io(e.to_string()))?;
 
@@ -98,16 +104,16 @@ impl Database {
         // If a snapshot exists in the .db file, load index descriptors and ensure indexes exist
         if let Ok(bytes) = std::fs::read(db_path)
             && let Ok(snap) = crate::wasp::decode_snapshot_from_bytes(&bytes)
-        {
-            for (cname, descs) in &snap.indexes {
-                let col = engine_arc
-                    .get_collection(cname)
-                    .unwrap_or_else(|| engine_arc.create_collection(cname.clone()));
-                for d in descs {
-                    col.create_index(&d.field, d.kind);
+            {
+                for (cname, descs) in &snap.indexes {
+                    let col = engine_arc
+                        .get_collection(cname)
+                        .unwrap_or_else(|| engine_arc.create_collection(cname.clone()));
+                    for d in descs {
+                        col.create_index(&d.field, d.kind);
+                    }
                 }
             }
-        }
 
         let name = db_path.file_stem().and_then(|s| s.to_str()).unwrap_or("nexuslite").to_string();
 
@@ -137,20 +143,25 @@ impl Database {
             let _ = crate::fsutil::create_secure(&wasp_path)
                 .map_err(|e| DbError::Io(format!("Failed to create WASP file: {e}")))?;
         }
-        // Recovery on reconnect: verify manifest slots and attempt repair if needed
-        let _ = crate::recovery::recover::verify_manifests(&wasp_path)
-            .and_then(|r| {
+        // Recovery on reconnect: verify manifest slots and attempt repair if enabled
+        if crate::feature_flags::is_enabled("recovery")
+            && crate::feature_flags::recovery_auto_recover()
+        {
+            let _ = crate::recovery::recover::verify_manifests(&wasp_path).and_then(|r| {
                 if r.both_valid {
                     Ok(())
                 } else {
                     crate::recovery::recover::repair_manifests(&wasp_path).map(|_| ())
                 }
             });
-        // Initialize logging next to DB: {db_dir}/{db_stem}_logs/{db_stem}.log
-        if let Some(stem) = db_path.file_stem().and_then(|s| s.to_str()) {
-            let base = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
-            let _ = crate::logger::init_for_db_in(base, stem);
         }
+        // Initialize logging next to DB if enabled
+        if crate::feature_flags::is_enabled("db-logging")
+            && let Some(stem) = db_path.file_stem().and_then(|s| s.to_str())
+            {
+                let base = db_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+                let _ = crate::logger::init_for_db_in(base, stem);
+            }
         let engine = Engine::with_wasp(wasp_path).map_err(|e| DbError::Io(e.to_string()))?;
         let engine_arc = Arc::new(engine);
         crate::register_engine(&engine_arc);
@@ -343,7 +354,9 @@ impl Database {
     /// # Errors
     /// Returns an error if persisting the snapshot fails.
     pub fn checkpoint(&self, filepath: &Path) -> Result<(), DbError> {
-        self.engine.checkpoint_with_indexes(filepath).map_err(|e| DbError::Io(e.to_string()))
+        self.engine
+            .checkpoint_with_indexes(filepath)
+            .map_err(|e| DbError::SnapshotError(format!("checkpoint failed: {e}")))
     }
 
     /// Returns the logical database name.

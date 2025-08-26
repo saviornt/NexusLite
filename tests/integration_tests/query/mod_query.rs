@@ -1,6 +1,6 @@
 use bson::doc;
-use nexus_lite::document::{Document, DocumentType};
-use nexus_lite::query::{
+use nexuslite::document::{Document, DocumentType};
+use nexuslite::query::{
     CmpOp, Filter, FindOptions, Order, SortSpec, UpdateDoc, apply_update, count_docs, find_docs,
 };
 
@@ -8,11 +8,11 @@ use nexus_lite::query::{
 fn filter_eq_and_count() {
     let d1 = Document::new(doc! {"age": 30, "name": "alice"}, DocumentType::Persistent);
     let _d2 = Document::new(doc! {"age": 40, "name": "bob"}, DocumentType::Persistent);
-    assert!(nexus_lite::query::eval_filter(
+    assert!(nexuslite::query::eval_filter(
         &d1.data.0,
         &Filter::Cmp { path: "age".into(), op: CmpOp::Eq, value: 30.into() }
     ));
-    assert!(!nexus_lite::query::eval_filter(
+    assert!(!nexuslite::query::eval_filter(
         &d1.data.0,
         &Filter::Cmp { path: "age".into(), op: CmpOp::Gt, value: 45.into() }
     ));
@@ -44,14 +44,14 @@ fn update_inc_int64_and_cmp_lt_not() {
 
     // Lt branch should work, and Not should invert
     let f_lt = Filter::Cmp { path: "age".into(), op: CmpOp::Lt, value: 40.into() };
-    assert!(nexus_lite::query::eval_filter(&d.data.0, &f_lt));
+    assert!(nexuslite::query::eval_filter(&d.data.0, &f_lt));
     let f_not = Filter::Not(Box::new(f_lt));
-    assert!(!nexus_lite::query::eval_filter(&d.data.0, &f_not));
+    assert!(!nexuslite::query::eval_filter(&d.data.0, &f_not));
 }
 
 #[test]
 fn find_sort_project_paginate() {
-    use nexus_lite::engine::Engine;
+    use nexuslite::engine::Engine;
     use tempfile::tempdir;
     let dir = tempdir().unwrap();
     let db_name = "qtestdb";
@@ -83,19 +83,19 @@ fn find_sort_project_paginate() {
 
 #[test]
 fn test_query_find_redaction() {
-    use nexus_lite::engine::Engine;
+    use nexuslite::engine::Engine;
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::new(dir.path().join("test.wasp")).unwrap();
     let col = engine.create_collection("users".into());
-    let id = col.insert_document(nexus_lite::document::Document::new(
+    let id = col.insert_document(nexuslite::document::Document::new(
         doc! {"user":"alice","password":"secret"},
-        nexus_lite::document::DocumentType::Persistent,
+        nexuslite::document::DocumentType::Persistent,
     ));
     assert!(col.find_document(&id).is_some());
     // Use programmatic CLI path to emit NDJSON with redaction
-    let _ = nexus_lite::cli::run(
+    let _ = nexuslite::cli::run(
         &engine,
-        nexus_lite::cli::Command::QueryFindR {
+        nexuslite::cli::Command::QueryFindR {
             collection: "users".into(),
             filter_json: "{}".into(),
             project: None,

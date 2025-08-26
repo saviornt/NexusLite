@@ -1,4 +1,7 @@
-use p256::ecdsa::{signature::{Signer, Verifier}, Signature, SigningKey, VerifyingKey};
+use p256::ecdsa::{
+    Signature, SigningKey, VerifyingKey,
+    signature::{Signer, Verifier},
+};
 use p256::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use std::fs;
 use std::io::Read;

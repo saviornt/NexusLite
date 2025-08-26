@@ -1,11 +1,11 @@
-use nexus_lite::api;
+use nexuslite::api;
 
 #[test]
 fn checkpoint_and_restore_encrypted_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("crypto.db");
     // Create DB and some content
-    let db = nexus_lite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
+    let db = nexuslite::Database::new(Some(db_path.to_str().unwrap())).unwrap();
     let _ = db.create_collection("c1");
 
     // Generate keys

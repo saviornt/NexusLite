@@ -1,5 +1,5 @@
-use nexus_lite::cli::{Command, run};
-use nexus_lite::engine::Engine;
+use nexuslite::cli::{Command, run};
+use nexuslite::engine::Engine;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -18,7 +18,8 @@ fn create_persistent_and_ephemeral_via_cli() {
             ephemeral: false,
             ttl_secs: None,
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     let ephemeral = json!({"task":"temp","state":"pending"}).to_string();
     run(
@@ -29,15 +30,16 @@ fn create_persistent_and_ephemeral_via_cli() {
             ephemeral: true,
             ttl_secs: Some(60),
         },
-    ).unwrap();
+    )
+    .unwrap();
 
     let users = engine.get_collection("users").expect("users collection");
     let docs_users = users.get_all_documents();
     assert_eq!(docs_users.len(), 1);
-    assert_eq!(docs_users[0].metadata.document_type, nexus_lite::document::DocumentType::Persistent);
+    assert_eq!(docs_users[0].metadata.document_type, nexuslite::document::DocumentType::Persistent);
 
     let temp = engine.get_collection("_tempDocuments").expect("_tempDocuments collection");
     let docs_temp = temp.get_all_documents();
     assert_eq!(docs_temp.len(), 1);
-    assert_eq!(docs_temp[0].metadata.document_type, nexus_lite::document::DocumentType::Ephemeral);
+    assert_eq!(docs_temp[0].metadata.document_type, nexuslite::document::DocumentType::Ephemeral);
 }

@@ -46,12 +46,29 @@ pub enum Filter {
     And(Vec<Filter>),
     Or(Vec<Filter>),
     Not(Box<Filter>),
-    Exists { path: String, exists: bool },
-    In { path: String, values: Vec<Bson> },
-    Nin { path: String, values: Vec<Bson> },
-    Cmp { path: String, op: CmpOp, value: Bson },
+    Exists {
+        path: String,
+        exists: bool,
+    },
+    In {
+        path: String,
+        values: Vec<Bson>,
+    },
+    Nin {
+        path: String,
+        values: Vec<Bson>,
+    },
+    Cmp {
+        path: String,
+        op: CmpOp,
+        value: Bson,
+    },
     #[cfg(feature = "regex")]
-    Regex { path: String, pattern: String, case_insensitive: bool },
+    Regex {
+        path: String,
+        pattern: String,
+        case_insensitive: bool,
+    },
 }
 
 #[derive(Debug, Default, Clone)]

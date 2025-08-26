@@ -3,8 +3,6 @@
 /// # Errors
 /// Always returns `FeatureNotImplemented` until PQC is implemented.
 pub fn kem_derive_shared_secret() -> Result<(), crate::errors::DbError> {
-    if crate::feature_flags::is_enabled("crypto-pqc") {
-        return Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()));
-    }
+    // PQC removed from runtime features; always not implemented for now
     Err(crate::errors::DbError::FeatureNotImplemented("crypto-pqc".into()))
 }

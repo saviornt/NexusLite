@@ -1,2 +1,2 @@
-mod prop_sign;
 mod prop_hash;
+mod prop_sign;

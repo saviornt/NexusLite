@@ -12,7 +12,7 @@ proptest! {
         default_enabled in any::<bool>(),
         set_enabled in any::<bool>()
     ) {
-        use nexus_lite::utils::feature_flags as ff;
+    use nexuslite::utils::feature_flags as ff;
         // Use a unique name per case to avoid cross-test interference
         let unique = format!("propff_{}_{}", name, default_enabled as u8);
         ff::ensure(&unique, default_enabled, "prop test");

@@ -18,19 +18,11 @@ static FLAGS: LazyLock<RwLock<HashMap<String, FeatureFlag>>> = LazyLock::new(|| 
     let mut map = HashMap::new();
     // Register default flags here.
     map.insert(
-		"crypto-pqc".to_string(),
-		FeatureFlag {
-			name: "crypto-pqc".to_string(),
-			enabled: false,
-			description: "Post-quantum cryptography (ML-KEM, SPHINCS+). Not currently available; stub for future work.".to_string(),
-		},
-	);
-    map.insert(
-        "crypto-ecc".to_string(),
+        "crypto".to_string(),
         FeatureFlag {
-            name: "crypto-ecc".to_string(),
+            name: "crypto".to_string(),
             enabled: true,
-            description: "Elliptic-curve cryptography (P-256 ECDH/ECDSA) is available.".to_string(),
+            description: "Cryptography enabled (ECC by default).".to_string(),
         },
     );
     map.insert(
@@ -58,6 +50,47 @@ static FLAGS: LazyLock<RwLock<HashMap<String, FeatureFlag>>> = LazyLock::new(|| 
             name: "cli-bin".to_string(),
             enabled: true,
             description: "Clap-based CLI binary available (nexuslite).".to_string(),
+        },
+    );
+    map.insert(
+        "db-logging".to_string(),
+        FeatureFlag {
+            name: "db-logging".to_string(),
+            enabled: true,
+            description: "Enable database and process logs (app/audit/metrics).".to_string(),
+        },
+    );
+    map.insert(
+        "telemetry-adv".to_string(),
+        FeatureFlag {
+            name: "telemetry-adv".to_string(),
+            enabled: true,
+            description: "Advanced telemetry: query logs, structured outputs, extra counters."
+                .to_string(),
+        },
+    );
+    map.insert(
+        "recovery".to_string(),
+        FeatureFlag {
+            name: "recovery".to_string(),
+            enabled: true,
+            description: "Snapshot/backup helpers and recovery controls (WASP).".to_string(),
+        },
+    );
+    map.insert(
+        "doctor".to_string(),
+        FeatureFlag {
+            name: "doctor".to_string(),
+            enabled: true,
+            description: "Enable database health checks and diagnostics commands.".to_string(),
+        },
+    );
+    map.insert(
+        "repl".to_string(),
+        FeatureFlag {
+            name: "repl".to_string(),
+            enabled: true,
+            description: "Interactive REPL shell available (nexuslite shell).".to_string(),
         },
     );
     RwLock::new(map)
@@ -100,11 +133,69 @@ pub fn list() -> Vec<FeatureFlag> {
 }
 
 /// Initialize runtime feature flags from environment variables.
-/// Currently supported:
-/// - NEXUSLITE_USE_PQC: "1", "true", "yes" enable crypto-pqc; "0", "false", "no" disable.
 pub fn init_from_env() {
-    if let Ok(v) = std::env::var("NEXUSLITE_USE_PQC") {
-        let val = matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes");
-        let _ = set("crypto-pqc", val);
+    // No-op for now; reserved for future env-driven flags
+}
+
+// Hidden crypto mode selector; defaults to ECC. Not exposed as a runtime flag.
+// Future option reserved (commented): PQC.
+#[derive(Clone, Copy, Debug)]
+pub enum CryptoMode {
+    Ecc,
+    // Pqc, // reserved
+}
+
+static CRYPTO_MODE: LazyLock<RwLock<CryptoMode>> = LazyLock::new(|| RwLock::new(CryptoMode::Ecc));
+
+/// Get the current crypto mode as a stable string ("ecc").
+/// Not toggleable via CLI/API; reserved for future.
+pub fn crypto_mode() -> &'static str {
+    match *CRYPTO_MODE.read() {
+        CryptoMode::Ecc => "ecc",
+        // CryptoMode::Pqc => "pqc",
+    }
+}
+
+// ---- Recovery feature options ----
+#[derive(Clone, Copy, Debug)]
+pub struct RecoveryConfig {
+    pub auto_recover: bool,
+}
+
+static RECOVERY_CFG: LazyLock<RwLock<RecoveryConfig>> =
+    LazyLock::new(|| RwLock::new(RecoveryConfig { auto_recover: false }));
+
+pub fn recovery_set_auto_recover(enabled: bool) {
+    RECOVERY_CFG.write().auto_recover = enabled;
+}
+pub fn recovery_auto_recover() -> bool {
+    RECOVERY_CFG.read().auto_recover
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_contains_known_flags() {
+        let names: Vec<String> = list().into_iter().map(|f| f.name).collect();
+        assert!(names.contains(&"crypto".to_string()));
+        assert!(names.contains(&"recovery".to_string()));
+    }
+
+    #[test]
+    fn set_and_get_flag() {
+        ensure("unit-ff", false, "unit test flag");
+        assert!(!is_enabled("unit-ff"));
+        assert!(set("unit-ff", true));
+        assert!(is_enabled("unit-ff"));
+    }
+
+    #[test]
+    fn recovery_auto_recover_toggles() {
+        recovery_set_auto_recover(false);
+        assert!(!recovery_auto_recover());
+        recovery_set_auto_recover(true);
+        assert!(recovery_auto_recover());
     }
 }

@@ -9,16 +9,20 @@ pub struct NdjsonSink<W: Write> {
     w: BufWriter<W>,
 }
 impl<W: Write> NdjsonSink<W> {
-    pub fn new(inner: W) -> Self { Self { w: BufWriter::new(inner) } }
+    pub fn new(inner: W) -> Self {
+        Self { w: BufWriter::new(inner) }
+    }
 }
 impl<W: Write> DocSink for NdjsonSink<W> {
     fn write_doc(&mut self, doc: &bson::Document) -> io::Result<()> {
-        let v = bson::to_bson(doc).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let s = serde_json::to_string(&v)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let v: serde_json::Value = bson::Bson::from(doc.clone()).into();
+        let s =
+            serde_json::to_string(&v).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         writeln!(self.w, "{s}")
     }
-    fn finish(mut self: Box<Self>) -> io::Result<()> { self.w.flush() }
+    fn finish(mut self: Box<Self>) -> io::Result<()> {
+        self.w.flush()
+    }
 }
 
 pub struct CsvSink<W: Write> {
@@ -58,7 +62,9 @@ pub struct BsonSink<W: Write> {
     w: BufWriter<W>,
 }
 impl<W: Write> BsonSink<W> {
-    pub fn new(inner: W) -> Self { Self { w: BufWriter::new(inner) } }
+    pub fn new(inner: W) -> Self {
+        Self { w: BufWriter::new(inner) }
+    }
 }
 impl<W: Write> DocSink for BsonSink<W> {
     fn write_doc(&mut self, doc: &bson::Document) -> io::Result<()> {
@@ -66,7 +72,9 @@ impl<W: Write> DocSink for BsonSink<W> {
         doc.to_writer(&mut buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.w.write_all(&buf)
     }
-    fn finish(mut self: Box<Self>) -> io::Result<()> { self.w.flush() }
+    fn finish(mut self: Box<Self>) -> io::Result<()> {
+        self.w.flush()
+    }
 }
 
 fn bson_to_string(v: &bson::Bson) -> String {

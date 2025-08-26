@@ -4,11 +4,11 @@ use std::io::Cursor;
 
 fuzz_target!(|data: &[u8]| {
     if data.len() > 16384 { return; }
-    let engine = match nexus_lite::engine::Engine::new(std::env::temp_dir().join("fuzz_csv.wasp")) { Ok(e) => e, Err(_) => return };
-    let mut opts = nexus_lite::import::ImportOptions::default();
+    let engine = match nexuslite::engine::Engine::new(std::env::temp_dir().join("fuzz_csv.wasp")) { Ok(e) => e, Err(_) => return };
+    let mut opts = nexuslite::import::ImportOptions::default();
     opts.collection = "fuzz".into();
     opts.csv.has_headers = true;
     opts.csv.type_infer = true;
     let cur = Cursor::new(data);
-    let _ = nexus_lite::import::import_from_reader(&engine, cur, nexus_lite::import::ImportFormat::Csv, &opts);
+    let _ = nexuslite::import::import_from_reader(&engine, cur, nexuslite::import::ImportFormat::Csv, &opts);
 });

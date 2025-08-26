@@ -1,6 +1,6 @@
 use bson::doc;
-use nexus_lite::cache::{Cache, CacheConfig, EvictionMode};
-use nexus_lite::document::{Document, DocumentType};
+use nexuslite::cache::{Cache, CacheConfig, EvictionMode};
+use nexuslite::document::{Document, DocumentType};
 use std::time::Duration;
 use tokio::time::sleep;
 

@@ -11,7 +11,7 @@ fuzz = true
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 arbitrary = { version = "1", features = ["derive"] }
 
-[dependencies.nexus_lite]
+[dependencies.nexuslite]
 path = ".."
 features = []
 

@@ -10,7 +10,10 @@ pub mod kyber;
 pub use ecc::{decrypt_file_p256, encrypt_file_p256};
 pub use kyber::kem_derive_shared_secret;
 
-use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
+};
 use p256::elliptic_curve::rand_core::{OsRng, RngCore};
 use std::fs;
 use std::io::{Read, Write};

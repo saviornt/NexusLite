@@ -1,8 +1,8 @@
 use bson::doc;
-use nexus_lite::document::{Document, DocumentType};
-use nexus_lite::engine::Engine;
-use nexus_lite::export::{ExportFormat, ExportOptions, export_file};
-use nexus_lite::query::{Filter, FilterSerde};
+use nexuslite::document::{Document, DocumentType};
+use nexuslite::engine::Engine;
+use nexuslite::export::{ExportFormat, ExportOptions, export_file};
+use nexuslite::query::{Filter, FilterSerde};
 use std::fs;
 use tempfile::tempdir;
 
@@ -114,7 +114,12 @@ async fn test_export_with_filter_and_limit() {
     });
     let fs: FilterSerde = serde_json::from_value(filter_json).unwrap();
     let filter = Filter::try_from(fs).unwrap();
-    let opts = ExportOptions { format: ExportFormat::Ndjson, filter: Some(filter), limit: Some(5), ..Default::default() };
+    let opts = ExportOptions {
+        format: ExportFormat::Ndjson,
+        filter: Some(filter),
+        limit: Some(5),
+        ..Default::default()
+    };
     let rep = export_file(&engine, "users", &out, &opts).unwrap();
     assert_eq!(rep.written, 5);
     let s = fs::read_to_string(out).unwrap();

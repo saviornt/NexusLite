@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 pub enum IndexKind {
     Hash,
     BTree,
+    // Vector, // TODO: enable when vector index is implemented
 }
 
 #[derive(Debug, Clone, Default)]
@@ -236,6 +237,7 @@ impl BTreeIndex {
 pub enum IndexImpl {
     Hash(HashIndex),
     BTree(BTreeIndex),
+    // Vector(VectorIndex), // TODO: placeholder for future ANN index
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +262,7 @@ impl IndexManager {
         let idx = match kind {
             IndexKind::Hash => IndexImpl::Hash(HashIndex::new(field.to_string())),
             IndexKind::BTree => IndexImpl::BTree(BTreeIndex::new(field.to_string())),
+            // IndexKind::Vector => IndexImpl::Vector(VectorIndex::new(field.to_string())),
         };
         self.indexes.insert(field.to_string(), idx);
     }
@@ -275,6 +278,7 @@ impl IndexManager {
                 kind: match i {
                     IndexImpl::Hash(_) => IndexKind::Hash,
                     IndexImpl::BTree(_) => IndexKind::BTree,
+                    // IndexImpl::Vector(_) => IndexKind::Vector,
                 },
             })
             .collect()
@@ -286,6 +290,7 @@ pub fn index_insert_all(mgr: &mut IndexManager, doc: &BsonDocument, id: &Documen
         match idx {
             IndexImpl::Hash(h) => h.insert(doc, id),
             IndexImpl::BTree(b) => b.insert(doc, id),
+            // IndexImpl::Vector(v) => v.insert(doc, id),
         }
     }
 }
@@ -295,6 +300,7 @@ pub fn index_remove_all(mgr: &mut IndexManager, doc: &BsonDocument, id: &Documen
         match idx {
             IndexImpl::Hash(h) => h.remove(doc, id),
             IndexImpl::BTree(b) => b.remove(doc, id),
+            // IndexImpl::Vector(v) => v.remove(doc, id),
         }
     }
 }
@@ -306,6 +312,7 @@ pub fn lookup_eq(mgr: &mut IndexManager, field: &str, v: &Bson) -> Option<Vec<Do
             // Equality via BTree exact bound
             b.lookup_range(Some(v), Some(v), true, true)
         }
+        // Some(IndexImpl::Vector(v)) => v.lookup_knn(v),
         _ => None,
     }
 }
@@ -320,6 +327,21 @@ pub fn lookup_range(
 ) -> Option<Vec<DocumentId>> {
     match mgr.indexes.get_mut(field) {
         Some(IndexImpl::BTree(b)) => b.lookup_range(min, max, incl_min, incl_max),
+        // Some(IndexImpl::Vector(v)) => v.lookup_range(min, max, incl_min, incl_max),
         _ => None,
     }
 }
+
+// Below is a placeholder for a future approximate nearest neighbor (ANN) vector index.
+// It is intentionally commented out to avoid changing public API until ready.
+//
+// pub struct VectorIndex {
+//     pub field: String,
+//     // TODO: store vector embeddings and an ANN structure (e.g., HNSW)
+// }
+// impl VectorIndex {
+//     pub fn new(field: String) -> Self { Self { field } }
+//     pub fn insert(&mut self, _doc: &BsonDocument, _id: &DocumentId) { /* TODO */ }
+//     pub fn remove(&mut self, _doc: &BsonDocument, _id: &DocumentId) { /* TODO */ }
+//     pub fn lookup_knn(&mut self, _q: &Bson) -> Option<Vec<DocumentId>> { None }
+// }

@@ -15,7 +15,7 @@ pub enum DbError {
     Json(#[from] serde_json::Error),
 
     #[error("BSON: {0}")]
-    Bson(#[from] bson::de::Error),
+    Bson(#[from] bson::error::Error),
 
     #[error("Collection not found: {0}")]
     NoSuchCollection(String),
@@ -31,6 +31,15 @@ pub enum DbError {
 
     #[error("WAL error: {0}")]
     WalError(String),
+
+    #[error("WASP shadow paging error: {0}")]
+    ShadowPagingError(String),
+
+    #[error("WASP snapshot error: {0}")]
+    SnapshotError(String),
+
+    #[error("WASP page map error: {0}")]
+    PageMapError(String),
 
     #[error("Cache error: {0}")]
     CacheError(String),

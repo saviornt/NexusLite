@@ -1,10 +1,12 @@
-use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
+};
 use hkdf::Hkdf;
 use p256::{
-    ecdh,
+    PublicKey, SecretKey, ecdh,
     elliptic_curve::rand_core::{OsRng, RngCore},
     pkcs8::{DecodePrivateKey, DecodePublicKey},
-    PublicKey, SecretKey,
 };
 use sha2::Sha256;
 use std::fs;
@@ -73,7 +75,7 @@ pub fn decrypt_file_p256(
     }
     let mut len_buf = [0u8; 2];
     f.read_exact(&mut len_buf)?;
-    let eph_len = u16::from_be_bytes(len_buf) as usize;
+    let eph_len = crate::utils::num::u16_to_usize(u16::from_be_bytes(len_buf));
     let mut eph_bytes = vec![0u8; eph_len];
     f.read_exact(&mut eph_bytes)?;
     let eph_pub = PublicKey::from_sec1_bytes(&eph_bytes)?;

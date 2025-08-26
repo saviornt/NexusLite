@@ -1,4 +1,4 @@
-use nexus_lite::telemetry;
+use nexuslite::telemetry;
 use std::thread;
 use std::time::Duration;
 

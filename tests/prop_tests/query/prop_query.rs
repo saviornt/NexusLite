@@ -1,5 +1,5 @@
 use bson::Bson;
-use nexus_lite::query::{CmpOp, Filter, eval_filter};
+use nexuslite::query::{CmpOp, Filter, eval_filter};
 use proptest::prelude::*;
 
 proptest! {
@@ -50,14 +50,14 @@ proptest! {
     #[test]
     #[ignore = "slow on CI; run in scheduled full builds"]
     fn prop_projection_preserves_selected_fields(a in any::<i64>(), b in any::<i64>()) {
-        use nexus_lite::query::{FindOptions, SortSpec, Order};
-        use nexus_lite::engine::Engine;
+    use nexuslite::query::{FindOptions, SortSpec, Order};
+    use nexuslite::engine::Engine;
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::new(dir.path().join("test.wasp")).unwrap();
         let col = engine.create_collection("proj".into());
-        col.insert_document(nexus_lite::document::Document::new(bson::doc!{"x": a, "y": b, "z": 1}, nexus_lite::document::DocumentType::Persistent));
+    col.insert_document(nexuslite::document::Document::new(bson::doc!{"x": a, "y": b, "z": 1}, nexuslite::document::DocumentType::Persistent));
         let opts = FindOptions { projection: Some(vec!["x".into(), "y".into()]), sort: Some(vec![SortSpec{ field: "x".into(), order: Order::Asc }]), limit: Some(1), skip: Some(0), timeout_ms: None };
-    let cur = nexus_lite::query::find_docs(&col, &nexus_lite::query::Filter::True, &opts);
+    let cur = nexuslite::query::find_docs(&col, &nexuslite::query::Filter::True, &opts);
         let docs = cur.to_vec();
         prop_assert_eq!(docs.len(), 1);
         let d = &docs[0].data.0;
@@ -69,13 +69,13 @@ proptest! {
     #[test]
     #[ignore = "slow on CI; run in scheduled full builds"]
     fn prop_pagination_bounds(n in 0usize..200) {
-        use nexus_lite::engine::Engine;
+    use nexuslite::engine::Engine;
     let dir = tempfile::tempdir().unwrap();
     let engine = Engine::new(dir.path().join("test.wasp")).unwrap();
         let col = engine.create_collection("pag".into());
-        for i in 0..n { col.insert_document(nexus_lite::document::Document::new(bson::doc!{"i": i as i64}, nexus_lite::document::DocumentType::Persistent)); }
-        let opts = nexus_lite::query::FindOptions { projection: None, sort: None, limit: Some(50), skip: Some(usize::MAX/2), timeout_ms: None };
-    let cur = nexus_lite::query::find_docs(&col, &nexus_lite::query::Filter::True, &opts);
+    for i in 0..n { col.insert_document(nexuslite::document::Document::new(bson::doc!{"i": i as i64}, nexuslite::document::DocumentType::Persistent)); }
+        let opts = nexuslite::query::FindOptions { projection: None, sort: None, limit: Some(50), skip: Some(usize::MAX/2), timeout_ms: None };
+    let cur = nexuslite::query::find_docs(&col, &nexuslite::query::Filter::True, &opts);
         let docs = cur.to_vec();
         // With huge skip, result must be empty, not panic
         prop_assert!(docs.len() <= 50);

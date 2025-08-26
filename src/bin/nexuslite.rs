@@ -1,7 +1,8 @@
+#![forbid(unsafe_code)]
 #![allow(clippy::too_many_lines, clippy::cognitive_complexity)]
+
 use clap::{Parser, Subcommand};
-use nexus_lite::document::DocumentType;
-use nexus_lite::{cli as prog_cli, engine::Engine};
+use nexuslite::{cli as prog_cli, engine::Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::{IsTerminal, Write};
@@ -147,23 +148,49 @@ struct Cli {
         help = "Override database path (e.g., mydb.db). Takes precedence over config/env."
     )]
     db: Option<PathBuf>,
-    /// Enable post-quantum crypto flows (stub only; will cause FeatureNotImplemented on use)
-    #[arg(long = "use-pqc", default_value_t = false, help = "Enable post-quantum crypto flows (stub only)")]
-    use_pqc: bool,
+    /// Output as JSON for status-like commands
+    #[arg(long, help = "Output as JSON for status-like commands", conflicts_with = "plain")]
+    json: bool,
+    /// Output as plain key/value or minimal values for status-like commands
+    #[arg(long, help = "Output as plain text for status-like commands", conflicts_with = "json")]
+    plain: bool,
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand, Debug)]
-enum Commands {
-    // DB and collections
-    #[command(name = "new-db", about = "Create a new database (creates .db and .wasp if missing)")]
-    NewDb {
+enum FeatureCommands {
+    #[command(name = "list", about = "List feature flags and their status")]
+    List,
+    #[command(name = "enable", about = "Enable a runtime feature flag")]
+    Enable { name: String },
+    #[command(name = "disable", about = "Disable a runtime feature flag")]
+    Disable { name: String },
+    #[command(name = "info", about = "Show information about a feature flag")]
+    Info { name: String },
+}
+
+#[derive(Subcommand, Debug)]
+enum RecoveryCommands {
+    #[command(
+        name = "auto-recover",
+        about = "Get or set automatic recovery; omit --enabled to get current value"
+    )]
+    AutoRecover {
+        #[arg(long, value_name = "true|false", help = "Set auto-recover to true or false")]
+        enabled: Option<bool>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DbCommands {
+    #[command(name = "new", about = "Create a new database (creates .db and .wasp if missing)")]
+    New {
         #[arg(help = "Database file path (e.g., mydb.db). If omitted, defaults are used.")]
         path: Option<PathBuf>,
     },
-    #[command(name = "open-db", about = "Open an existing database and initialize the engine")]
-    OpenDb {
+    #[command(name = "open", about = "Open an existing database and initialize the engine")]
+    Open {
         #[arg(help = "Database file path to open (e.g., mydb.db)")]
         path: PathBuf,
         #[arg(long, help = "Verify .db.sig and .wasp.sig with the provided public key")]
@@ -181,30 +208,128 @@ enum Commands {
         )]
         sig_warn: bool,
     },
-    #[command(name = "close-db", about = "Close/unregister a previously opened database handle")]
-    CloseDb {
+    #[command(name = "close", about = "Close/unregister a previously opened database handle")]
+    Close {
         #[arg(help = "Database file path to close (e.g., mydb.db)")]
         path: PathBuf,
     },
-    #[command(name = "create-collection", about = "Create a collection in the current database")]
-    ColCreate {
+}
+
+#[derive(Subcommand, Debug)]
+enum CollectionCommands {
+    #[command(name = "create", about = "Create a collection in the current database")]
+    Create {
         #[arg(help = "Collection name to create")]
         name: String,
     },
-    #[command(name = "delete-collection", about = "Delete a collection from the current database")]
-    ColDelete {
+    #[command(name = "delete", about = "Delete a collection from the current database")]
+    Delete {
         #[arg(help = "Collection name to delete")]
         name: String,
     },
-    #[command(name = "list-collections", about = "List all collections in the current database")]
-    ColList,
-    #[command(name = "rename-collection", about = "Rename a collection in the current database")]
-    ColRename {
+    #[command(name = "list", about = "List all collections in the current database")]
+    List,
+    #[command(name = "rename", about = "Rename a collection in the current database")]
+    Rename {
         #[arg(help = "Existing collection name")]
         old: String,
         #[arg(help = "New collection name")]
         new: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum QueryCommands {
+    #[command(name = "find", about = "Find documents matching a filter")]
+    Find {
+        #[arg(help = "Target collection name; falls back to default_collection if set in config")]
+        collection: Option<String>,
+        #[arg(long, help = "Filter expression in JSON string form", default_value = "{}")]
+        filter: String,
+        #[arg(long, help = "Projection JSON, e.g. {\"_id\":0}")]
+        project: Option<String>,
+        #[arg(long, help = "Sort JSON, e.g. {\"x\":1}")]
+        sort: Option<String>,
+        #[arg(long, help = "Max results")]
+        limit: Option<usize>,
+        #[arg(long, help = "Skip first N results")]
+        skip: Option<usize>,
+        #[arg(long, help = "Fields to redact from output (repeatable)")]
+        redact: Option<Vec<String>>,
+    },
+    #[command(name = "count", about = "Count documents matching a filter")]
+    Count {
+        #[arg(help = "Target collection name; falls back to default_collection if set in config")]
+        collection: Option<String>,
+        #[arg(long, help = "Filter expression in JSON string form", default_value = "{}")]
+        filter: String,
+    },
+    #[command(
+        name = "update",
+        about = "Update documents matching a filter with an update specification"
+    )]
+    Update {
+        #[arg(help = "Target collection name; falls back to default_collection if set in config")]
+        collection: Option<String>,
+        #[arg(long, help = "Filter expression in JSON string form")]
+        filter: String,
+        #[arg(long, help = "Update expression in JSON string form")]
+        update: String,
+    },
+    #[command(name = "delete", about = "Delete documents matching a filter")]
+    Delete {
+        #[arg(help = "Target collection name; falls back to default_collection if set in config")]
+        collection: Option<String>,
+        #[arg(long, help = "Filter expression in JSON string form")]
+        filter: String,
+    },
+    #[command(name = "update-one", about = "Update a single document matching a filter")]
+    UpdateOne {
+        #[arg(help = "Target collection name; falls back to default_collection if set in config")]
+        collection: Option<String>,
+        #[arg(long, help = "Filter expression in JSON string form")]
+        filter: String,
+        #[arg(long, help = "Update expression in JSON string form")]
+        update: String,
+    },
+    #[command(name = "delete-one", about = "Delete a single document matching a filter")]
+    DeleteOne {
+        #[arg(help = "Target collection name; falls back to default_collection if set in config")]
+        collection: Option<String>,
+        #[arg(long, help = "Filter expression in JSON string form")]
+        filter: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    // Grouped subcommands (best-practice nouns/verbs)
+    #[command(name = "feature", about = "Manage runtime features (list/info/enable/disable)")]
+    Feature {
+        #[command(subcommand)]
+        cmd: FeatureCommands,
+    },
+    #[command(name = "recovery", about = "Recovery controls (auto-recover)")]
+    Recovery {
+        #[command(subcommand)]
+        cmd: RecoveryCommands,
+    },
+    #[command(name = "db", about = "Database management (new/open/close)")]
+    Db {
+        #[command(subcommand)]
+        cmd: DbCommands,
+    },
+    #[command(name = "collection", about = "Collection management (create/delete/list/rename)")]
+    Collection {
+        #[command(subcommand)]
+        cmd: CollectionCommands,
+    },
+    #[command(name = "query", about = "Query operations (find/count/update/delete)")]
+    Query {
+        #[command(subcommand)]
+        cmd: QueryCommands,
+    },
+    // Legacy single-level commands that do not yet have grouped equivalents remain below
     // Import/Export
     #[command(about = "Import data into a collection from a file (NDJSON/CSV/BSON)")]
     Import {
@@ -225,77 +350,16 @@ enum Commands {
         file: PathBuf,
         #[arg(help = "Format: ndjson|csv|bson; defaults to ndjson")]
         format: Option<String>,
-    #[arg(long, help = "Filter JSON to select documents (optional)")]
-    filter: Option<String>,
-    #[arg(long, help = "Limit number of documents exported (optional)")]
-    limit: Option<usize>,
+        #[arg(long, help = "Filter JSON to select documents (optional)")]
+        filter: Option<String>,
+        #[arg(long, help = "Limit number of documents exported (optional)")]
+        limit: Option<usize>,
         #[arg(
             long,
             value_delimiter = ',',
             help = "Comma-separated list of top-level fields to redact/mask in outputs (NDJSON/CSV)"
         )]
         redact: Option<Vec<String>>,
-    },
-    // Query
-    #[command(about = "Find documents matching a filter; prints NDJSON to stdout")]
-    Find {
-        #[arg(help = "Collection name; falls back to default_collection if set in config")]
-        collection: Option<String>,
-        #[arg(help = "Filter JSON (e.g., {\"age\": {\"$gte\": 21}})")]
-        filter: String,
-        #[arg(help = "Projection fields comma-separated (e.g., name,age)")]
-        project: Option<String>,
-        #[arg(help = "Sort spec comma-separated; -age,+name")]
-        sort: Option<String>,
-        #[arg(help = "Limit results")]
-        limit: Option<usize>,
-        #[arg(help = "Skip N results")]
-        skip: Option<usize>,
-        #[arg(
-            long,
-            value_delimiter = ',',
-            help = "Comma-separated list of top-level fields to redact in output"
-        )]
-        redact: Option<Vec<String>>,
-    },
-    #[command(about = "Count documents matching a filter")]
-    Count {
-        #[arg(help = "Collection name; falls back to default_collection if set in config")]
-        collection: Option<String>,
-        #[arg(help = "Filter JSON")]
-        filter: String,
-    },
-    #[command(about = "Update all documents matching a filter")]
-    Update {
-        #[arg(help = "Collection name; falls back to default_collection if set in config")]
-        collection: Option<String>,
-        #[arg(help = "Filter JSON")]
-        filter: String,
-        #[arg(help = "Update JSON (e.g., {\"$set\": {\"age\": 42}})")]
-        update: String,
-    },
-    #[command(about = "Delete all documents matching a filter")]
-    Delete {
-        #[arg(help = "Collection name; falls back to default_collection if set in config")]
-        collection: Option<String>,
-        #[arg(help = "Filter JSON")]
-        filter: String,
-    },
-    #[command(name = "update-document", about = "Update a single document matching a filter")]
-    UpdateOne {
-        #[arg(help = "Collection name; falls back to default_collection if set in config")]
-        collection: Option<String>,
-        #[arg(help = "Filter JSON")]
-        filter: String,
-        #[arg(help = "Update JSON")]
-        update: String,
-    },
-    #[command(name = "delete-document", about = "Delete a single document matching a filter")]
-    DeleteOne {
-        #[arg(help = "Collection name; falls back to default_collection if set in config")]
-        collection: Option<String>,
-        #[arg(help = "Filter JSON")]
-        filter: String,
     },
     #[command(
         name = "create-document",
@@ -482,29 +546,22 @@ enum Commands {
         #[arg(help = "Refill tokens per second")]
         refill_per_sec: u64,
     },
-    // Feature flags
-    #[command(name = "feature-list", about = "List feature flags and their status")]
-    FeatureList,
+    #[command(name = "version", about = "Show version and compiled/runtime features")]
+    Version,
+    #[command(name = "check", about = "Run quick configuration checks")]
+    Check,
     #[command(
-        name = "feature-enable",
-        about = "Enable a runtime feature flag (note: 'crypto-pqc' is not currently available; stub only)"
+        name = "log-config",
+        about = "Configure logging directory/level/retention (applies immediately)"
     )]
-    FeatureEnable {
-        #[arg(help = "Feature flag name (e.g., crypto-pqc)")]
-        name: String,
+    LogConfig {
+        #[arg(long, help = "Base directory for logs (default: .)")]
+        dir: Option<PathBuf>,
+        #[arg(long, help = "Global log level: error|warn|info|debug|trace (default: info)")]
+        level: Option<String>,
+        #[arg(long, help = "Number of rolled files to keep for each logger (default: 7)")]
+        retention: Option<usize>,
     },
-    #[command(name = "feature-disable", about = "Disable a runtime feature flag")]
-    FeatureDisable {
-        #[arg(help = "Feature flag name")]
-        name: String,
-    },
-    #[command(
-        name = "features-print",
-        about = "Print package, compiled features, and runtime flags"
-    )]
-    FeaturesPrint,
-    #[command(name = "features-check", about = "Fail if unknown runtime flags are present")]
-    FeaturesCheck,
 }
 
 fn ensure_engine(
@@ -521,13 +578,8 @@ fn ensure_engine(
 
 fn main() {
     let cli = Cli::parse();
-    // First, initialize runtime feature flags from environment.
-    nexus_lite::api::init_from_env();
-    // Toggle runtime PQC feature flag from the top-level switch.
-    // This simply flips the runtime feature and does not change compile-time behavior.
-    if cli.use_pqc {
-        nexus_lite::feature_flags::set("crypto-pqc", true);
-    }
+    // Initialize runtime feature flags from environment.
+    nexuslite::api::init_from_env();
     let cfg = load_config(cli.config.as_ref());
     let engine = match ensure_engine(cli.db.as_ref(), &cfg) {
         Ok(e) => e,
@@ -537,121 +589,253 @@ fn main() {
         }
     };
     let def_col = cfg.default_collection.clone();
+    let mode = if cli.json {
+        prog_cli::OutputMode::Json
+    } else if cli.plain {
+        prog_cli::OutputMode::Plain
+    } else {
+        prog_cli::OutputMode::Human
+    };
 
     let r = match cli.command {
-        Commands::NewDb { path } => {
-            prog_cli::run(&engine, prog_cli::Command::DbCreate { db_path: path })
-        }
-        Commands::OpenDb { path, verify_sig, pubkey, sig_warn } => {
-            fn read_line_stdin() -> String {
-                let mut s = String::new();
-                let _ = std::io::stdin().read_line(&mut s);
-                if s.ends_with('\n') {
-                    s.pop();
-                    if s.ends_with('\r') {
-                        s.pop();
-                    }
-                }
-                s
+        Commands::Feature { cmd } => match cmd {
+            FeatureCommands::List => {
+                prog_cli::run_with_format(&engine, prog_cli::Command::FeatureList, mode)
             }
-            // If DB/WASP are PBE-encrypted, ensure we have credentials; prompt if interactive terminal.
-            let wasp_path = path.with_extension("wasp");
-            let pbe_db = nexus_lite::crypto::pbe_is_encrypted(&path);
-            let pbe_wasp = wasp_path.exists() && nexus_lite::crypto::pbe_is_encrypted(&wasp_path);
-            let mut res: Result<(), Box<dyn std::error::Error>> = Ok(());
-            if pbe_db || pbe_wasp {
-                let mut username = std::env::var("NEXUSLITE_USERNAME").unwrap_or_default();
-                let mut password = std::env::var("NEXUSLITE_PASSWORD").unwrap_or_default();
-                // Allow prompting only if we are in an interactive terminal
-                if (username.is_empty() || password.is_empty()) && std::io::stdin().is_terminal() {
-                    // In test builds, include friendly defaults in prompt text to aid manual runs.
-                    #[cfg(test)]
-                    const PROMPT_USER: &str = "Username (admin): ";
-                    #[cfg(test)]
-                    const PROMPT_PASS: &str = "Password (password): ";
-                    #[cfg(not(test))]
-                    const PROMPT_USER: &str = "Username: ";
-                    #[cfg(not(test))]
-                    const PROMPT_PASS: &str = "Password: ";
-                    if username.is_empty() {
-                        eprint!("{}", PROMPT_USER);
-                        let _ = std::io::stderr().flush();
-                        username = read_line_stdin();
+            FeatureCommands::Enable { name } => {
+                prog_cli::run_with_format(&engine, prog_cli::Command::FeatureEnable { name }, mode)
+            }
+            FeatureCommands::Disable { name } => {
+                prog_cli::run_with_format(&engine, prog_cli::Command::FeatureDisable { name }, mode)
+            }
+            FeatureCommands::Info { name } => {
+                prog_cli::run_with_format(&engine, prog_cli::Command::FeatureInfo { name }, mode)
+            }
+        },
+        Commands::Recovery { cmd } => match cmd {
+            RecoveryCommands::AutoRecover { enabled } => match enabled {
+                Some(v) => prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::RecoveryAutoRecover { enabled: v },
+                    mode,
+                ),
+                None => prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::RecoveryAutoRecoverGet,
+                    mode,
+                ),
+            },
+        },
+        Commands::Db { cmd } => match cmd {
+            DbCommands::New { path } => prog_cli::run_with_format(
+                &engine,
+                prog_cli::Command::DbCreate { db_path: path },
+                mode,
+            ),
+            DbCommands::Open { path, verify_sig, pubkey, sig_warn } => {
+                fn read_line_stdin() -> String {
+                    let mut s = String::new();
+                    let _ = std::io::stdin().read_line(&mut s);
+                    if s.ends_with('\n') {
+                        s.pop();
+                        if s.ends_with('\r') {
+                            s.pop();
+                        }
                     }
-                    if password.is_empty() {
-                        password = rpassword::prompt_password(PROMPT_PASS).unwrap_or_default();
+                    s
+                }
+                // If DB/WASP are PBE-encrypted, ensure we have credentials; prompt if interactive terminal.
+                let wasp_path = path.with_extension("wasp");
+                let pbe_db = nexuslite::crypto::pbe_is_encrypted(&path);
+                let pbe_wasp =
+                    wasp_path.exists() && nexuslite::crypto::pbe_is_encrypted(&wasp_path);
+                let mut res: Result<(), Box<dyn std::error::Error>> = Ok(());
+                if pbe_db || pbe_wasp {
+                    let mut username = std::env::var("NEXUSLITE_USERNAME").unwrap_or_default();
+                    let mut password = std::env::var("NEXUSLITE_PASSWORD").unwrap_or_default();
+                    // Allow prompting only if we are in an interactive terminal
+                    if (username.is_empty() || password.is_empty())
+                        && std::io::stdin().is_terminal()
+                    {
+                        // In test builds, include friendly defaults in prompt text to aid manual runs.
+                        #[cfg(test)]
+                        const PROMPT_USER: &str = "Username (admin): ";
+                        #[cfg(test)]
+                        const PROMPT_PASS: &str = "Password (password): ";
+                        #[cfg(not(test))]
+                        const PROMPT_USER: &str = "Username: ";
+                        #[cfg(not(test))]
+                        const PROMPT_PASS: &str = "Password: ";
+                        if username.is_empty() {
+                            eprint!("{}", PROMPT_USER);
+                            let _ = std::io::stderr().flush();
+                            username = read_line_stdin();
+                        }
+                        if password.is_empty() {
+                            password = rpassword::prompt_password(PROMPT_PASS).unwrap_or_default();
+                        }
+                    }
+                    if username.is_empty() || password.is_empty() {
+                        res = Err("PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD or run interactively".into());
+                    }
+                    if res.is_ok()
+                        && let Err(e) = nexuslite::api::decrypt_db_with_password(
+                            path.as_path(),
+                            &username,
+                            &password,
+                        )
+                    {
+                        res = Err(e.into());
                     }
                 }
-                if username.is_empty() || password.is_empty() {
-                    res = Err("PBE-encrypted DB: set NEXUSLITE_USERNAME and NEXUSLITE_PASSWORD or run interactively".into());
+                if res.is_ok() {
+                    res = prog_cli::run_with_format(
+                        &engine,
+                        prog_cli::Command::DbOpen { db_path: path.clone() },
+                        mode,
+                    );
                 }
                 if res.is_ok()
-                    && let Err(e) = nexus_lite::api::decrypt_db_with_password(
-                        path.as_path(),
-                        &username,
-                        &password,
+                    && verify_sig
+                    && let Some(pk) = pubkey
+                    && let Ok(pub_pem) = std::fs::read_to_string(&pk)
+                {
+                    let wasp = path.with_extension("wasp");
+                    let db_sig = path.with_extension("db.sig");
+                    let wasp_sig = wasp.with_extension("wasp.sig");
+                    let mut failed = false;
+                    if db_sig.exists()
+                        && let Ok(sig) = std::fs::read(&db_sig)
+                        && !nexuslite::api::crypto_verify_file(&pub_pem, &path, &sig)
+                            .unwrap_or(false)
+                    {
+                        eprintln!("SIGNATURE VERIFICATION FAILED: {}", path.display());
+                        failed = true;
+                    }
+                    if wasp.exists()
+                        && wasp_sig.exists()
+                        && let Ok(sig) = std::fs::read(&wasp_sig)
+                        && !nexuslite::api::crypto_verify_file(&pub_pem, &wasp, &sig)
+                            .unwrap_or(false)
+                    {
+                        eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
+                        failed = true;
+                    }
+                    // Determine policy: CLI flag overrides config; default is fail
+                    let warn = sig_warn || matches!(cfg.sig_policy.as_deref(), Some("warn"));
+                    if failed && !warn {
+                        res = Err("signature verification failed".into());
+                    }
+                }
+                res
+            }
+            DbCommands::Close { path } => prog_cli::run_with_format(
+                &engine,
+                prog_cli::Command::DbClose { db_path: path },
+                mode,
+            ),
+        },
+        Commands::Collection { cmd } => match cmd {
+            CollectionCommands::Create { name } => {
+                prog_cli::run(&engine, prog_cli::Command::ColCreate { name })
+            }
+            CollectionCommands::Delete { name } => {
+                prog_cli::run(&engine, prog_cli::Command::ColDelete { name })
+            }
+            CollectionCommands::List => {
+                prog_cli::run_with_format(&engine, prog_cli::Command::ColList, mode)
+            }
+            CollectionCommands::Rename { old, new } => {
+                prog_cli::run(&engine, prog_cli::Command::ColRename { old, new })
+            }
+        },
+        Commands::Query { cmd } => match cmd {
+            QueryCommands::Find { collection, filter, project, sort, limit, skip, redact } => {
+                let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
+                if let Some(fields) = redact {
+                    prog_cli::run(
+                        &engine,
+                        prog_cli::Command::QueryFindR {
+                            collection: c,
+                            filter_json: filter,
+                            project,
+                            sort,
+                            limit,
+                            skip,
+                            redact_fields: Some(fields),
+                        },
                     )
-                {
-                    res = Err(e.into());
+                } else {
+                    prog_cli::run(
+                        &engine,
+                        prog_cli::Command::QueryFind {
+                            collection: c,
+                            filter_json: filter,
+                            project,
+                            sort,
+                            limit,
+                            skip,
+                        },
+                    )
                 }
             }
-            if res.is_ok() {
-                res = prog_cli::run(&engine, prog_cli::Command::DbOpen { db_path: path.clone() });
+            QueryCommands::Count { collection, filter } => {
+                let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
+                prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::QueryCount { collection: c, filter_json: filter },
+                    mode,
+                )
             }
-            if res.is_ok()
-                && verify_sig
-                && let Some(pk) = pubkey
-                && let Ok(pub_pem) = std::fs::read_to_string(&pk)
-            {
-                let wasp = path.with_extension("wasp");
-                let db_sig = path.with_extension("db.sig");
-                let wasp_sig = wasp.with_extension("wasp.sig");
-                let mut failed = false;
-                if db_sig.exists()
-                    && let Ok(sig) = std::fs::read(&db_sig)
-                    && !nexus_lite::api::crypto_verify_file(&pub_pem, &path, &sig).unwrap_or(false)
-                {
-                    eprintln!("SIGNATURE VERIFICATION FAILED: {}", path.display());
-                    failed = true;
-                }
-                if wasp.exists()
-                    && wasp_sig.exists()
-                    && let Ok(sig) = std::fs::read(&wasp_sig)
-                    && !nexus_lite::api::crypto_verify_file(&pub_pem, &wasp, &sig).unwrap_or(false)
-                {
-                    eprintln!("SIGNATURE VERIFICATION FAILED: {}", wasp.display());
-                    failed = true;
-                }
-                // Determine policy: CLI flag overrides config; default is fail
-                let warn = sig_warn || matches!(cfg.sig_policy.as_deref(), Some("warn"));
-                if failed && !warn {
-                    res = Err("signature verification failed".into());
-                }
+            QueryCommands::Update { collection, filter, update } => {
+                let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
+                prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::QueryUpdate {
+                        collection: c,
+                        filter_json: filter,
+                        update_json: update,
+                    },
+                    mode,
+                )
             }
-            res
-        }
-        Commands::FeatureList => prog_cli::run(&engine, prog_cli::Command::FeatureList),
-        Commands::FeatureEnable { name } => {
-            prog_cli::run(&engine, prog_cli::Command::FeatureEnable { name })
-        }
-        Commands::FeatureDisable { name } => {
-            prog_cli::run(&engine, prog_cli::Command::FeatureDisable { name })
-        }
-        Commands::FeaturesPrint => prog_cli::run(&engine, prog_cli::Command::FeaturesPrint),
-        Commands::FeaturesCheck => prog_cli::run(&engine, prog_cli::Command::FeaturesCheck),
-        Commands::CloseDb { path } => {
-            prog_cli::run(&engine, prog_cli::Command::DbClose { db_path: path })
-        }
-        Commands::ColCreate { name } => {
-            prog_cli::run(&engine, prog_cli::Command::ColCreate { name })
-        }
-        Commands::ColDelete { name } => {
-            prog_cli::run(&engine, prog_cli::Command::ColDelete { name })
-        }
-        Commands::ColList => prog_cli::run(&engine, prog_cli::Command::ColList),
-        Commands::ColRename { old, new } => {
-            prog_cli::run(&engine, prog_cli::Command::ColRename { old, new })
-        }
+            QueryCommands::Delete { collection, filter } => {
+                let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
+                prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::QueryDelete { collection: c, filter_json: filter },
+                    mode,
+                )
+            }
+            QueryCommands::UpdateOne { collection, filter, update } => {
+                let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
+                prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::QueryUpdateOne {
+                        collection: c,
+                        filter_json: filter,
+                        update_json: update,
+                    },
+                    mode,
+                )
+            }
+            QueryCommands::DeleteOne { collection, filter } => {
+                let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
+                prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::QueryDeleteOne { collection: c, filter_json: filter },
+                    mode,
+                )
+            }
+        },
+        Commands::Info => prog_cli::run_with_format(&engine, prog_cli::Command::Info, mode),
+        Commands::Version => prog_cli::run_with_format(&engine, prog_cli::Command::Version, mode),
+        Commands::Check => prog_cli::run(&engine, prog_cli::Command::Check),
+        Commands::LogConfig { dir, level, retention } => prog_cli::run_with_format(
+            &engine,
+            prog_cli::Command::LogConfig { dir, level, retention },
+            mode,
+        ),
         Commands::Import { collection, file, format } => {
             let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
             prog_cli::run(&engine, prog_cli::Command::Import { collection: c, file, format })
@@ -670,78 +854,7 @@ fn main() {
                 },
             )
         }
-        Commands::Find { collection, filter, project, sort, limit, skip, redact } => {
-            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
-            if let Some(fields) = redact {
-                prog_cli::run(
-                    &engine,
-                    prog_cli::Command::QueryFindR {
-                        collection: c,
-                        filter_json: filter,
-                        project,
-                        sort,
-                        limit,
-                        skip,
-                        redact_fields: Some(fields),
-                    },
-                )
-            } else {
-                prog_cli::run(
-                    &engine,
-                    prog_cli::Command::QueryFind {
-                        collection: c,
-                        filter_json: filter,
-                        project,
-                        sort,
-                        limit,
-                        skip,
-                    },
-                )
-            }
-        }
-        Commands::Count { collection, filter } => {
-            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
-            prog_cli::run(
-                &engine,
-                prog_cli::Command::QueryCount { collection: c, filter_json: filter },
-            )
-        }
-        Commands::Update { collection, filter, update } => {
-            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
-            prog_cli::run(
-                &engine,
-                prog_cli::Command::QueryUpdate {
-                    collection: c,
-                    filter_json: filter,
-                    update_json: update,
-                },
-            )
-        }
-        Commands::Delete { collection, filter } => {
-            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
-            prog_cli::run(
-                &engine,
-                prog_cli::Command::QueryDelete { collection: c, filter_json: filter },
-            )
-        }
-        Commands::UpdateOne { collection, filter, update } => {
-            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
-            prog_cli::run(
-                &engine,
-                prog_cli::Command::QueryUpdateOne {
-                    collection: c,
-                    filter_json: filter,
-                    update_json: update,
-                },
-            )
-        }
-        Commands::DeleteOne { collection, filter } => {
-            let c = collection.or_else(|| def_col.clone()).unwrap_or_else(|| "default".into());
-            prog_cli::run(
-                &engine,
-                prog_cli::Command::QueryDeleteOne { collection: c, filter_json: filter },
-            )
-        }
+
         Commands::CreateDocument { collection, json, ephemeral, ttl, stdin } => {
             // Support reading JSON from STDIN if requested
             let payload_res: Result<String, Box<dyn std::error::Error>> = if stdin {
@@ -778,9 +891,11 @@ fn main() {
         Commands::CryptoSignFile { key_priv, input, out_sig } => {
             prog_cli::run(&engine, prog_cli::Command::CryptoSignFile { key_priv, input, out_sig })
         }
-        Commands::CryptoVerifyFile { key_pub, input, sig } => {
-            prog_cli::run(&engine, prog_cli::Command::CryptoVerifyFile { key_pub, input, sig })
-        }
+        Commands::CryptoVerifyFile { key_pub, input, sig } => prog_cli::run_with_format(
+            &engine,
+            prog_cli::Command::CryptoVerifyFile { key_pub, input, sig },
+            mode,
+        ),
         Commands::CryptoEncryptFile { key_pub, input, output } => {
             prog_cli::run(&engine, prog_cli::Command::CryptoEncryptFile { key_pub, input, output })
         }
@@ -801,330 +916,286 @@ fn main() {
             prog_cli::run(&engine, prog_cli::Command::DecryptDbPbe { db_path, username })
         }
         Commands::TelemetrySetSlow { ms } => {
-            prog_cli::run(&engine, prog_cli::Command::TelemetrySetSlow { ms })
+            prog_cli::run_with_format(&engine, prog_cli::Command::TelemetrySetSlow { ms }, mode)
         }
-        Commands::TelemetrySetAudit { enabled } => {
-            prog_cli::run(&engine, prog_cli::Command::TelemetrySetAudit { enabled })
-        }
-        Commands::TelemetrySetQueryLog { path, slow_ms, structured } => prog_cli::run(
+        Commands::TelemetrySetAudit { enabled } => prog_cli::run_with_format(
+            &engine,
+            prog_cli::Command::TelemetrySetAudit { enabled },
+            mode,
+        ),
+        Commands::TelemetrySetQueryLog { path, slow_ms, structured } => prog_cli::run_with_format(
             &engine,
             prog_cli::Command::TelemetrySetQueryLog { path, slow_ms, structured },
+            mode,
         ),
-        Commands::TelemetrySetMaxGlobal { limit } => {
-            prog_cli::run(&engine, prog_cli::Command::TelemetrySetMaxGlobal { limit })
-        }
-        Commands::TelemetrySetMaxFor { collection, limit } => {
-            prog_cli::run(&engine, prog_cli::Command::TelemetrySetMaxFor { collection, limit })
-        }
-        Commands::TelemetryRateLimit { collection, capacity, refill_per_sec } => prog_cli::run(
+        Commands::TelemetrySetMaxGlobal { limit } => prog_cli::run_with_format(
             &engine,
-            prog_cli::Command::TelemetryRateLimit { collection, capacity, refill_per_sec },
+            prog_cli::Command::TelemetrySetMaxGlobal { limit },
+            mode,
         ),
-        Commands::TelemetryRateRemove { collection } => {
-            prog_cli::run(&engine, prog_cli::Command::TelemetryRateRemove { collection })
+        Commands::TelemetrySetMaxFor { collection, limit } => prog_cli::run_with_format(
+            &engine,
+            prog_cli::Command::TelemetrySetMaxFor { collection, limit },
+            mode,
+        ),
+        Commands::TelemetryRateLimit { collection, capacity, refill_per_sec } => {
+            prog_cli::run_with_format(
+                &engine,
+                prog_cli::Command::TelemetryRateLimit { collection, capacity, refill_per_sec },
+                mode,
+            )
         }
-        Commands::TelemetryRateDefault { capacity, refill_per_sec } => prog_cli::run(
+        Commands::TelemetryRateRemove { collection } => prog_cli::run_with_format(
+            &engine,
+            prog_cli::Command::TelemetryRateRemove { collection },
+            mode,
+        ),
+        Commands::TelemetryRateDefault { capacity, refill_per_sec } => prog_cli::run_with_format(
             &engine,
             prog_cli::Command::TelemetryRateDefault { capacity, refill_per_sec },
+            mode,
         ),
-        Commands::Info => {
-            // Print basic stats; for now, collection names and cache metrics
-            let names = engine.list_collection_names();
-            eprintln!("collections: {}", names.len());
-            let mut ephemeral_total = 0usize;
-            let mut persistent_total = 0usize;
-            for n in names {
-                if let Some(c) = engine.get_collection(&n) {
-                    let docs = c.get_all_documents();
-                    let mut eph = 0usize;
-                    let mut per = 0usize;
-                    for d in &docs {
-                        match d.metadata.document_type {
-                            DocumentType::Ephemeral => eph += 1,
-                            DocumentType::Persistent => per += 1,
-                        }
-                    }
-                    if n == "_tempDocuments" {
-                        ephemeral_total += eph + per;
-                    } else {
-                        persistent_total += per + eph;
-                    }
-                    let m = c.cache_metrics();
-                    println!(
-                        "{}: docs={}, ephemeral={}, persistent={}, hits={}, misses={}",
-                        n,
-                        docs.len(),
-                        eph,
-                        per,
-                        m.hits,
-                        m.misses
-                    );
-                }
-            }
-            eprintln!("totals: ephemeral={ephemeral_total}, persistent={persistent_total}");
-            // Show compiled features and runtime flags
-            let report = nexus_lite::api::info(&engine);
-            if report.compiled_features.is_empty() {
-                println!("compiled_features: <none>");
-            } else {
-                println!("compiled_features: {}", report.compiled_features.join(","));
-            }
-            if !report.runtime_flags.is_empty() {
-                println!("runtime_flags:");
-                for f in report.runtime_flags {
-                    println!("  {}\tenabled={}\t{}", f.name, f.enabled, f.description);
-                }
-            }
-            Ok(())
-        }
+
         Commands::Doctor => {
-            // Basic fs checks; try to open db path if provided
-            if let Some(db) = cli.db.clone().or_else(|| cfg.db_path.clone()) {
-                let wasp = db.with_extension("wasp");
-                let ok = std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&wasp)
-                    .is_ok();
-                println!("wasp_access:{} path:{}", ok, wasp.display());
+            if !nexuslite::feature_flags::is_enabled("doctor") {
+                eprintln!("doctor feature disabled");
+                Ok(())
             } else {
-                println!("no_db_specified");
-            }
-            // Config hygiene: scan config files for secret-like keys and prefer env vars
-            let paths = find_config_paths(cli.config.as_ref());
-            println!("config_scanned:{}", paths.len());
-            for p in paths {
-                if p.exists() {
-                    match std::fs::read_to_string(&p) {
-                        Ok(s) => match s.parse::<toml::Value>() {
-                            Ok(val) => {
-                                let secrets = scan_toml_for_secret_keys(&val);
-                                if secrets.is_empty() {
-                                    println!("config_file:{} status:ok", p.display());
-                                } else {
-                                    println!(
-                                        "config_file:{} status:warning secret_keys:{} (values REDACTED)",
-                                        p.display(),
-                                        secrets.join(",")
-                                    );
+                // Gather data
+                let wasp_info = if let Some(db) = cli.db.clone().or_else(|| cfg.db_path.clone()) {
+                    let wasp = db.with_extension("wasp");
+                    let ok = std::fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(&wasp)
+                        .is_ok();
+                    Some((ok, wasp.display().to_string()))
+                } else {
+                    None
+                };
+
+                let mut config_files: Vec<(String, String)> = Vec::new();
+                let paths = find_config_paths(cli.config.as_ref());
+                for p in paths {
+                    if p.exists() {
+                        let status = match std::fs::read_to_string(&p) {
+                            Ok(s) => match s.parse::<toml::Value>() {
+                                Ok(val) => {
+                                    let secrets = scan_toml_for_secret_keys(&val);
+                                    if secrets.is_empty() {
+                                        "ok".to_string()
+                                    } else {
+                                        format!("warning secret_keys:{}", secrets.join(","))
+                                    }
                                 }
-                            }
-                            Err(_) => {
-                                println!("config_file:{} status:parse_error", p.display());
-                            }
-                        },
-                        Err(_) => println!("config_file:{} status:unreadable", p.display()),
+                                Err(_) => "parse_error".to_string(),
+                            },
+                            Err(_) => "unreadable".to_string(),
+                        };
+                        config_files.push((p.display().to_string(), status));
                     }
                 }
-            }
-            // Env var hygiene: list secret-like keys but redact values
-            let mut env_secret_keys: Vec<String> = Vec::new();
-            for (k, _v) in std::env::vars() {
-                if is_secret_key(&k) {
-                    env_secret_keys.push(k);
+
+                let mut env_secret_keys: Vec<String> = Vec::new();
+                for (k, _v) in std::env::vars() {
+                    if is_secret_key(&k) {
+                        env_secret_keys.push(k);
+                    }
                 }
-            }
-            if !env_secret_keys.is_empty() {
                 env_secret_keys.sort();
-                let s_keys_total = env_secret_keys.len();
-                println!("env_secrets: {s_keys_total} entries (values REDACTED)");
-                for k in env_secret_keys {
-                    println!("env:{k}=REDACTED");
-                }
-                // Summary status for environments with secrets
-                println!("status:warning");
+                let status = if env_secret_keys.is_empty() { "ok" } else { "warning" }.to_string();
+                let advice = "prefer environment variables for secrets; avoid storing secrets in config files".to_string();
+
+                prog_cli::run_with_format(
+                    &engine,
+                    prog_cli::Command::DoctorSummary {
+                        wasp_access: wasp_info,
+                        config_files,
+                        env_secret_keys,
+                        advice,
+                        status,
+                    },
+                    mode,
+                )
             }
-            println!(
-                "advice: prefer environment variables for secrets; avoid storing secrets in config files"
-            );
-            Ok(())
         }
         Commands::Shell => {
-            use std::io::{self, Write};
-            let mut stdout = io::stdout();
-            let stdin = io::stdin();
-            let mut line = String::new();
-            println!("Type 'help' for commands. 'exit' to quit.");
-            loop {
-                line.clear();
-                write!(stdout, "> ").ok();
-                stdout.flush().ok();
-                if stdin.read_line(&mut line).is_err() {
-                    break;
-                }
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if trimmed.eq_ignore_ascii_case("exit") || trimmed.eq_ignore_ascii_case("quit") {
-                    break;
-                }
-                // Commands: help, info, config, list-collections, list-ephemeral, purge-ephemeral [all],
-                // find <col> <filter>, count <col> <filter>, update <col> <filter> <update>, delete <col> <filter>,
-                // create-document <col> <json> [ephemeral] [ttl=SECS]
-                if trimmed.eq_ignore_ascii_case("help") {
-                    println!(
-                        "Commands:\n  info\n  config\n  list-collections\n  list-ephemeral\n  purge-ephemeral [all]\n  find <collection> <filter-json>\n  count <collection> <filter-json>\n  update <collection> <filter-json> <update-json>\n  delete <collection> <filter-json>\n  create-document <collection> <json> [ephemeral] [ttl=SECS]\n  exit"
-                    );
-                    continue;
-                }
-                if trimmed.eq_ignore_ascii_case("info") {
-                    let report = nexus_lite::api::info(&engine);
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".into())
-                    );
-                    continue;
-                }
-                if trimmed.eq_ignore_ascii_case("config") {
-                    let as_json =
-                        serde_json::to_string_pretty(&cfg).unwrap_or_else(|_| "{}".into());
-                    // Redact common secret-like substrings just in case
-                    let redacted = as_json
-                        .replace("password", "***REDACTED***")
-                        .replace("secret", "***REDACTED***")
-                        .replace("token", "***REDACTED***")
-                        .replace("api_key", "***REDACTED***")
-                        .replace("apikey", "***REDACTED***");
-                    println!("{redacted}");
-                    continue;
-                }
-                if trimmed.eq_ignore_ascii_case("list-collections") {
-                    for n in engine.list_collection_names() {
-                        println!("{n}");
+            if !nexuslite::feature_flags::is_enabled("repl") {
+                eprintln!("repl feature disabled");
+                Ok(())
+            } else {
+                use std::io::{self, Write};
+                let mut stdout = io::stdout();
+                let stdin = io::stdin();
+                let mut line = String::new();
+                println!("Type 'help' for commands. 'exit' to quit.");
+                loop {
+                    line.clear();
+                    let _ = write!(stdout, "> ");
+                    let _ = stdout.flush();
+                    if stdin.read_line(&mut line).is_err() {
+                        break;
                     }
-                    continue;
-                }
-                if trimmed.eq_ignore_ascii_case("list-ephemeral") {
-                    prog_cli::run(&engine, prog_cli::Command::ListEphemeral).ok();
-                    continue;
-                }
-                if trimmed.eq_ignore_ascii_case("purge-ephemeral")
-                    || trimmed.eq_ignore_ascii_case("purge-ephemeral all")
-                {
-                    let all = trimmed.ends_with(" all");
-                    prog_cli::run(&engine, prog_cli::Command::PurgeEphemeral { all }).ok();
-                    continue;
-                }
-                if let Some(rest) = trimmed.strip_prefix("find ") {
-                    // format: find <collection> <json>
-                    let mut parts = rest.splitn(2, ' ');
-                    if let (Some(col), Some(fjson)) = (parts.next(), parts.next()) {
-                        prog_cli::run(
-                            &engine,
-                            prog_cli::Command::QueryFind {
-                                collection: col.to_string(),
-                                filter_json: fjson.to_string(),
-                                project: None,
-                                sort: None,
-                                limit: None,
-                                skip: None,
-                            },
-                        )
-                        .ok();
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
                         continue;
                     }
-                }
-                if let Some(rest) = trimmed.strip_prefix("count ")
-                    && let Some((col, fjson)) = rest.split_once(' ')
-                {
-                    prog_cli::run(
-                        &engine,
-                        prog_cli::Command::QueryCount {
-                            collection: col.to_string(),
-                            filter_json: fjson.to_string(),
-                        },
-                    )
-                    .ok();
-                    continue;
-                }
-                if let Some(rest) = trimmed.strip_prefix("delete ")
-                    && let Some((col, fjson)) = rest.split_once(' ')
-                {
-                    prog_cli::run(
-                        &engine,
-                        prog_cli::Command::QueryDelete {
-                            collection: col.to_string(),
-                            filter_json: fjson.to_string(),
-                        },
-                    )
-                    .ok();
-                    continue;
-                }
-                if let Some(rest) = trimmed.strip_prefix("update ") {
-                    // format: update <collection> <filter-json> <update-json>
-                    let mut parts = rest.splitn(3, ' ');
-                    if let (Some(col), Some(fjson), Some(uj)) =
-                        (parts.next(), parts.next(), parts.next())
+                    if trimmed.eq_ignore_ascii_case("exit") || trimmed.eq_ignore_ascii_case("quit")
                     {
-                        prog_cli::run(
+                        break;
+                    }
+                    if trimmed.eq_ignore_ascii_case("help") {
+                        println!(
+                            "Commands:\n  info\n  config\n  list-collections\n  list-ephemeral\n  purge-ephemeral [all]\n  find <collection> <filter-json>\n  count <collection> <filter-json>\n  update <collection> <filter-json> <update-json>\n  delete <collection> <filter-json>\n  create-document <collection> <json> [ephemeral] [ttl=SECS]\n  exit"
+                        );
+                        continue;
+                    }
+                    if trimmed.eq_ignore_ascii_case("info") {
+                        let report = nexuslite::api::info(&engine);
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".into())
+                        );
+                        continue;
+                    }
+                    if trimmed.eq_ignore_ascii_case("config") {
+                        let as_json =
+                            serde_json::to_string_pretty(&cfg).unwrap_or_else(|_| "{}".into());
+                        let redacted = as_json
+                            .replace("password", "***REDACTED***")
+                            .replace("secret", "***REDACTED***")
+                            .replace("token", "***REDACTED***")
+                            .replace("api_key", "***REDACTED***")
+                            .replace("apikey", "***REDACTED***");
+                        println!("{redacted}");
+                        continue;
+                    }
+                    if trimmed.eq_ignore_ascii_case("list-collections") {
+                        for n in engine.list_collection_names() {
+                            println!("{n}");
+                        }
+                        continue;
+                    }
+                    if trimmed.eq_ignore_ascii_case("list-ephemeral") {
+                        let _ = prog_cli::run(&engine, prog_cli::Command::ListEphemeral);
+                        continue;
+                    }
+                    if trimmed.eq_ignore_ascii_case("purge-ephemeral")
+                        || trimmed.eq_ignore_ascii_case("purge-ephemeral all")
+                    {
+                        let all = trimmed.ends_with(" all");
+                        let _ = prog_cli::run(&engine, prog_cli::Command::PurgeEphemeral { all });
+                        continue;
+                    }
+                    if let Some(rest) = trimmed.strip_prefix("find ") {
+                        let mut parts = rest.splitn(2, ' ');
+                        if let (Some(col), Some(fjson)) = (parts.next(), parts.next()) {
+                            let _ = prog_cli::run(
+                                &engine,
+                                prog_cli::Command::QueryFind {
+                                    collection: col.to_string(),
+                                    filter_json: fjson.to_string(),
+                                    project: None,
+                                    sort: None,
+                                    limit: None,
+                                    skip: None,
+                                },
+                            );
+                            continue;
+                        }
+                    }
+                    if let Some(rest) = trimmed.strip_prefix("count ")
+                        && let Some((col, fjson)) = rest.split_once(' ')
+                    {
+                        let _ = prog_cli::run(
                             &engine,
-                            prog_cli::Command::QueryUpdate {
+                            prog_cli::Command::QueryCount {
                                 collection: col.to_string(),
                                 filter_json: fjson.to_string(),
-                                update_json: uj.to_string(),
                             },
-                        )
-                        .ok();
+                        );
                         continue;
                     }
-                }
-                if let Some(rest) = trimmed.strip_prefix("create-document ") {
-                    // format: create-document <collection> <json> [ephemeral] [ttl=SECS]
-                    let mut parts = rest.split_whitespace();
-                    if let (Some(col), Some(json_start)) = (parts.next(), parts.next()) {
-                        // json may contain spaces; reconstruct from the original rest string
-                        // Find the position of the json in rest and take until next option or end
-                        let mut json = json_start.to_string();
-                        // crude: if json doesn't end with '}', keep appending tokens until it does
-                        for t in parts.clone() {
-                            if json.ends_with('}') {
-                                break;
-                            }
-                            json.push(' ');
-                            json.push_str(t);
-                        }
-                        let mut ephemeral = false;
-                        let mut ttl = None::<u64>;
-                        for t in parts {
-                            if t.eq_ignore_ascii_case("ephemeral") {
-                                ephemeral = true;
-                            }
-                            if let Some(v) = t.strip_prefix("ttl=")
-                                && let Ok(secs) = v.parse::<u64>()
-                            {
-                                ttl = Some(secs);
-                            }
-                        }
-                        prog_cli::run(
+                    if let Some(rest) = trimmed.strip_prefix("delete ")
+                        && let Some((col, fjson)) = rest.split_once(' ')
+                    {
+                        let _ = prog_cli::run(
                             &engine,
-                            prog_cli::Command::CreateDocument {
-                                collection: Some(col.to_string()),
-                                json,
-                                ephemeral,
-                                ttl_secs: ttl,
+                            prog_cli::Command::QueryDelete {
+                                collection: col.to_string(),
+                                filter_json: fjson.to_string(),
                             },
-                        )
-                        .ok();
+                        );
                         continue;
                     }
+                    if let Some(rest) = trimmed.strip_prefix("update ") {
+                        let mut parts = rest.splitn(3, ' ');
+                        if let (Some(col), Some(fjson), Some(uj)) =
+                            (parts.next(), parts.next(), parts.next())
+                        {
+                            let _ = prog_cli::run(
+                                &engine,
+                                prog_cli::Command::QueryUpdate {
+                                    collection: col.to_string(),
+                                    filter_json: fjson.to_string(),
+                                    update_json: uj.to_string(),
+                                },
+                            );
+                            continue;
+                        }
+                    }
+                    if let Some(rest) = trimmed.strip_prefix("create-document ") {
+                        let mut parts = rest.split_whitespace();
+                        if let (Some(col), Some(json_start)) = (parts.next(), parts.next()) {
+                            let mut json = json_start.to_string();
+                            for t in parts.clone() {
+                                if json.ends_with('}') {
+                                    break;
+                                }
+                                json.push(' ');
+                                json.push_str(t);
+                            }
+                            let mut ephemeral = false;
+                            let mut ttl = None::<u64>;
+                            for t in parts {
+                                if t.eq_ignore_ascii_case("ephemeral") {
+                                    ephemeral = true;
+                                }
+                                if let Some(v) = t.strip_prefix("ttl=")
+                                    && let Ok(secs) = v.parse::<u64>()
+                                {
+                                    ttl = Some(secs);
+                                }
+                            }
+                            let _ = prog_cli::run(
+                                &engine,
+                                prog_cli::Command::CreateDocument {
+                                    collection: Some(col.to_string()),
+                                    json,
+                                    ephemeral,
+                                    ttl_secs: ttl,
+                                },
+                            );
+                            continue;
+                        }
+                    }
+                    println!("unrecognized: {trimmed}");
                 }
-                println!("unrecognized: {trimmed}");
+                Ok(())
             }
-            Ok(())
         }
     };
     if let Err(e) = r {
         // Pretty rate-limit message
-        if let Some(db) = e.downcast_ref::<nexus_lite::errors::DbError>() {
+        if let Some(db) = e.downcast_ref::<nexuslite::errors::DbError>() {
             match db {
-                nexus_lite::errors::DbError::RateLimitedWithRetry { retry_after_ms } => {
+                nexuslite::errors::DbError::RateLimitedWithRetry { retry_after_ms } => {
                     eprintln!("rate-limited; retry-after-ms={retry_after_ms}");
                     std::process::exit(2);
                 }
-                nexus_lite::errors::DbError::RateLimited => {
+                nexuslite::errors::DbError::RateLimited => {
                     eprintln!("rate-limited");
                     std::process::exit(2);
                 }

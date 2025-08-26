@@ -36,8 +36,8 @@ impl Engine {
     pub fn new(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         // Kept for API compatibility: `new` now constructs a WASP-backed engine.
         let wasp = Wasp::new(path)?;
-    // Resolve and cache metadata path at engine creation to avoid env var races in tests
-    let metadata_path = Self::resolve_metadata_path();
+        // Resolve and cache metadata path at engine creation to avoid env var races in tests
+        let metadata_path = Self::resolve_metadata_path();
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
             storage: Arc::new(RwLock::new(Box::new(wasp))),
@@ -124,8 +124,8 @@ impl Engine {
     /// Returns an error if the storage engine fails to initialize or if ephemeral cache setup fails.
     pub fn with_wasp(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let wasp = Wasp::new(path)?;
-    // Resolve and cache metadata path at engine creation to avoid env var races in tests
-    let metadata_path = Self::resolve_metadata_path();
+        // Resolve and cache metadata path at engine creation to avoid env var races in tests
+        let metadata_path = Self::resolve_metadata_path();
         let engine = Self {
             collections: RwLock::new(HashMap::new()),
             storage: Arc::new(RwLock::new(Box::new(wasp))),

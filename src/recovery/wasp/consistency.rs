@@ -10,7 +10,9 @@ use super::manifest::Manifest;
 use super::page::{Page, WASP_PAGE_SIZE};
 
 #[must_use]
-pub fn verify_page_checksum(page: &Page) -> bool { page.verify_crc() }
+pub fn verify_page_checksum(page: &Page) -> bool {
+    page.verify_crc()
+}
 
 /// Protects against torn writes by writing the data twice and verifying both copies.
 pub fn torn_write_protect(data: &[u8], file: &mut File, offset: u64) -> io::Result<bool> {
@@ -47,13 +49,33 @@ pub struct ConsistencyReport {
 pub struct ConsistencyChecker {}
 impl ConsistencyChecker {
     #[must_use]
-    pub const fn new() -> Self { Self {} }
+    pub const fn new() -> Self {
+        Self {}
+    }
     /// Detailed check of both manifest slots with diagnostics.
     pub fn check_detailed(&self, file: &mut File) -> ConsistencyReport {
-        let offsets = [0u64, WASP_PAGE_SIZE as u64];
+    let offsets = [0u64, crate::utils::num::usize_to_u64(WASP_PAGE_SIZE)];
         let mut diags: [ManifestSlotDiagnostics; 2] = [
-            ManifestSlotDiagnostics { slot: 0, offset: offsets[0], read_ok: false, page_decoded: false, page_type_ok: false, crc_ok: false, manifest_decoded: false, version: None },
-            ManifestSlotDiagnostics { slot: 1, offset: offsets[1], read_ok: false, page_decoded: false, page_type_ok: false, crc_ok: false, manifest_decoded: false, version: None },
+            ManifestSlotDiagnostics {
+                slot: 0,
+                offset: offsets[0],
+                read_ok: false,
+                page_decoded: false,
+                page_type_ok: false,
+                crc_ok: false,
+                manifest_decoded: false,
+                version: None,
+            },
+            ManifestSlotDiagnostics {
+                slot: 1,
+                offset: offsets[1],
+                read_ok: false,
+                page_decoded: false,
+                page_type_ok: false,
+                crc_ok: false,
+                manifest_decoded: false,
+                version: None,
+            },
         ];
         for (i, off) in offsets.iter().enumerate() {
             let d = &mut diags[i];
@@ -65,28 +87,39 @@ impl ConsistencyChecker {
                     d.page_decoded = true;
                     d.page_type_ok = page.header.page_type == 1;
                     d.crc_ok = page.verify_crc();
-                    if d.page_type_ok && d.crc_ok && let Ok(m) = Manifest::from_bytes(&page.data) {
+                    if d.page_type_ok
+                        && d.crc_ok
+                        && let Ok(m) = Manifest::from_bytes(&page.data)
+                    {
                         d.manifest_decoded = true;
                         d.version = Some(m.version);
                     }
                 }
             }
         }
-        let both_valid = diags.iter().all(|d| d.read_ok && d.page_decoded && d.page_type_ok && d.crc_ok && d.manifest_decoded);
+        let both_valid = diags.iter().all(|d| {
+            d.read_ok && d.page_decoded && d.page_type_ok && d.crc_ok && d.manifest_decoded
+        });
         ConsistencyReport { both_valid, slots: diags }
     }
 
     /// Backward-compatible boolean check.
-    pub fn check(&self, file: &mut File) -> bool { self.check_detailed(file).both_valid }
+    pub fn check(&self, file: &mut File) -> bool {
+        self.check_detailed(file).both_valid
+    }
 }
-impl Default for ConsistencyChecker { fn default() -> Self { Self::new() } }
+impl Default for ConsistencyChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Repair manifest slots so both contain the latest valid manifest page. Returns a detailed report.
 pub fn recover_manifests(file: &mut File) -> io::Result<ConsistencyReport> {
     let checker = ConsistencyChecker::new();
     let report = checker.check_detailed(file);
     let mut latest_valid: Option<(usize, u64, Vec<u8>)> = None; // (slot, version, bytes)
-    let offsets = [0u64, WASP_PAGE_SIZE as u64];
+    let offsets = [0u64, crate::utils::num::usize_to_u64(WASP_PAGE_SIZE)];
 
     for (i, off) in offsets.iter().enumerate() {
         let mut buf = vec![0u8; WASP_PAGE_SIZE];
@@ -105,14 +138,21 @@ pub fn recover_manifests(file: &mut File) -> io::Result<ConsistencyReport> {
         }
     }
 
-    let (best_slot, _best_ver, best_bytes) = latest_valid
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "No valid manifest slot to recover from"))?;
+    let (best_slot, _best_ver, best_bytes) = latest_valid.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "No valid manifest slot to recover from")
+    })?;
 
     for (i, _off) in offsets.iter().enumerate() {
-        if i == best_slot { continue; }
+        if i == best_slot {
+            continue;
+        }
         let d = &report.slots[i];
-        let needs_copy = !(d.read_ok && d.page_decoded && d.page_type_ok && d.crc_ok && d.manifest_decoded);
-        let version_differs = match (report.slots[best_slot].version, d.version) { (Some(a), Some(b)) => a != b, _ => true };
+        let needs_copy =
+            !(d.read_ok && d.page_decoded && d.page_type_ok && d.crc_ok && d.manifest_decoded);
+        let version_differs = match (report.slots[best_slot].version, d.version) {
+            (Some(a), Some(b)) => a != b,
+            _ => true,
+        };
         if needs_copy || version_differs {
             file.seek(SeekFrom::Start(offsets[i]))?;
             file.write_all(&best_bytes)?;

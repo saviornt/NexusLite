@@ -8,7 +8,7 @@ proptest! {
     })]
     #[test]
     fn prop_normalize_db_path_appends_db_ext_when_missing(mut name in "[A-Za-z0-9_-]{0,32}") {
-        use nexus_lite::utils::fsutil::normalize_db_path;
+    use nexuslite::utils::fsutil::normalize_db_path;
         if name.is_empty() { name = "".into(); }
         let p = if name.is_empty() { normalize_db_path(None) } else { normalize_db_path(Some(&name)) };
         let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
@@ -19,7 +19,7 @@ proptest! {
 
     #[test]
     fn prop_open_create_secure_files(temp_name in "[A-Za-z0-9_-]{1,16}") {
-        use nexus_lite::utils::fsutil::{create_secure, open_rw_no_trunc};
+    use nexuslite::utils::fsutil::{create_secure, open_rw_no_trunc};
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join(format!("{temp_name}.bin"));
         // create_secure should succeed and not truncate on second open

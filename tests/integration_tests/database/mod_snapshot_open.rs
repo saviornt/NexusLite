@@ -1,6 +1,6 @@
 use bson::doc;
-use nexus_lite::Database;
-use nexus_lite::index::IndexKind;
+use nexuslite::Database;
+use nexuslite::index::IndexKind;
 use tempfile::tempdir;
 
 #[test]
@@ -12,9 +12,9 @@ fn database_open_rebuilds_indexes_from_snapshot() {
     let db = Database::new(db_path.to_str()).unwrap();
     let col = db.create_collection("users");
     col.create_index("k", IndexKind::Hash);
-    let d = nexus_lite::document::Document::new(
+    let d = nexuslite::document::Document::new(
         doc! {"k": 42},
-        nexus_lite::document::DocumentType::Persistent,
+        nexuslite::document::DocumentType::Persistent,
     );
     let _ = db.insert_document("users", d);
     db.checkpoint(&db_path).expect("checkpoint should succeed");
@@ -36,6 +36,6 @@ fn database_checkpoint_round_trip_basic() {
     col.create_index("a", IndexKind::BTree);
     db.checkpoint(&db_path).expect("checkpoint ok");
     let bytes = std::fs::read(&db_path).unwrap();
-    let snap = nexus_lite::wasp::decode_snapshot_from_bytes(&bytes).unwrap();
+    let snap = nexuslite::wasp::decode_snapshot_from_bytes(&bytes).unwrap();
     assert!(snap.indexes.get("c").is_some());
 }

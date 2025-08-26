@@ -1,4 +1,8 @@
-use nexus_lite::types::Operation;
+// Create a recovery & logging benchmark for:
+// An SQLite-style WAL file (append only), that would be checkpointed into the main DB file
+// And then log the resulting benchmark
+
+use nexuslite::types::Operation;
 use bincode::config::standard;
 use bincode::serde::{decode_from_slice, encode_to_vec};
 use std::fs::{File, OpenOptions};
@@ -48,7 +52,7 @@ impl Wal {
                 break;
             }
             let encoded_op = &buffer[offset..offset + usize::try_from(len).unwrap_or(0)];
-            let operation = decode_from_slice::<nexus_lite::types::Operation, _>(encoded_op, standard());
+            let operation = decode_from_slice::<nexuslite::types::Operation, _>(encoded_op, standard());
             operations.push(operation.map(|(op, _)| op));
             offset += usize::try_from(len).unwrap_or(0);
         }

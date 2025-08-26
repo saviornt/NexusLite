@@ -1,5 +1,5 @@
-use nexus_lite::cli::{Command, run};
-use nexus_lite::engine::Engine;
+use nexuslite::cli::{Command, run};
+use nexuslite::engine::Engine;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -19,7 +19,8 @@ fn purge_ephemeral_behaviour() {
                 ephemeral: true,
                 ttl_secs: None,
             },
-        ).unwrap();
+        )
+        .unwrap();
     }
     run(&engine, Command::PurgeEphemeral { all: false }).unwrap();
     let temp = engine.get_collection("_tempDocuments").unwrap();

@@ -23,8 +23,8 @@ pub fn import_bson<R: Read>(
         if len <= 0 || len > 16_000_000 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid bson size"));
         }
-        let len = usize::try_from(len)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid bson size"))?;
+        let len = crate::utils::num::i32_to_usize(len)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid bson size"))?;
         if full.capacity() < len {
             full.reserve(len - full.capacity());
         }

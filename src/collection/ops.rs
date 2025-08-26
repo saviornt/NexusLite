@@ -1,6 +1,6 @@
 use super::core::Collection;
 use crate::document::Document;
-use crate::index::{index_insert_all, index_remove_all, IndexImpl};
+use crate::index::{IndexImpl, index_insert_all, index_remove_all};
 use crate::telemetry;
 use crate::types::{DocumentId, Operation};
 use crate::wasp::{DeltaKey, DeltaOp, IndexDelta};

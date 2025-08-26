@@ -1,7 +1,7 @@
 use crate::types::SerializableDateTime;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use chrono::Utc;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentType {

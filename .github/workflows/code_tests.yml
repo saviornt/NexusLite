@@ -1,7 +1,7 @@
 # This workflow consolidates various CI and testing jobs into a single file.
 # It runs all tests on both Ubuntu and Windows to ensure platform compatibility.
 
-name: Code Tests
+name: "Code Tests"
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
   # A single, comprehensive CRON job to run all checks weekly.
   # This runs every Monday at 03:00 UTC.
   schedule:
-    - cron: '0 3 * * 1'
+  - cron: "0 3 * * 1"
   # Allows for manual triggering of the workflow from the GitHub Actions UI.
   workflow_dispatch:
 
@@ -25,7 +25,7 @@ jobs:
   # These jobs ensure the code compiles and adheres to style and security standards.
 
   build-and-lint:
-    name: Build & Lint
+    name: "Build & Lint"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -56,12 +56,12 @@ jobs:
       - name: Run Rustfmt check
         run: cargo fmt --all -- --check
       - name: Run features print
-        run: cargo run --quiet --bin nexuslite -- features-print
+        run: cargo run --quiet --bin nexuslite -- version
       - name: Run features check
-        run: cargo run --quiet --bin nexuslite -- features-check
+        run: cargo run --quiet --bin nexuslite -- check
 
   security-audit:
-    name: Security Audit
+    name: "Security Audit"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -109,7 +109,7 @@ jobs:
   # These jobs run various tests to ensure code correctness and robustness.
 
   run-tests:
-    name: Run Tests
+    name: "Run Tests"
     needs: build-and-lint
     runs-on: ${{ matrix.os }}
     # Full tests for push to main, schedule, or manual; skipped on pull_request (quick job handles PRs)
@@ -140,7 +140,7 @@ jobs:
         run: cargo test --workspace ${{ matrix.features }} --quiet -- --ignored
 
   run-tests-regex:
-    name: Run Tests (regex feature)
+    name: "Run Tests (regex feature)"
     needs: build-and-lint
     runs-on: ${{ matrix.os }}
     if: ${{ github.event_name != 'pull_request' }}
@@ -170,7 +170,7 @@ jobs:
         run: cargo test --workspace ${{ matrix.features }} --quiet -- --ignored
 
   run-tests-quick:
-    name: Run Tests (Quick)
+    name: "Run Tests (Quick)"
     needs: build-and-lint
     runs-on: ${{ matrix.os }}
     # Quick path for PRs: skip slow proptests by name pattern
@@ -200,7 +200,7 @@ jobs:
         run: cargo test --workspace --quiet -- --skip prop_ --skip ignored
 
   miri:
-    name: Miri (UB checker)
+    name: "Miri (UB checker)"
     needs: build-and-lint
     runs-on: ${{ matrix.os }}
     strategy:
@@ -241,7 +241,7 @@ jobs:
           path: miri-report.txt
 
   cargo-mutants:
-    name: Mutation Tests
+    name: "Mutation Tests"
     needs: build-and-lint
     runs-on: ${{ matrix.os }}
     strategy:
@@ -268,7 +268,7 @@ jobs:
           path: mutants-report.txt
 
   fuzz-smoke-tests:
-    name: Fuzz Smoke
+    name: "Fuzz Smoke"
     needs: build-and-lint
     runs-on: ${{ matrix.os }}
     strategy:
@@ -288,27 +288,27 @@ jobs:
         run: cargo fuzz build
       - name: Create reports directory
         run: mkdir reports
-      - name: 'Fuzz smoke: filter parser'
+      - name: "Fuzz smoke: filter parser"
         working-directory: fuzz
         continue-on-error: true
         run: |
           cargo fuzz run fuzz_filter_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-filter-report.txt
-      - name: 'Fuzz smoke: update parser'
+      - name: "Fuzz smoke: update parser"
         working-directory: fuzz
         continue-on-error: true
         run: |
           cargo fuzz run fuzz_update_parser -- -runs=2000 -timeout=5 > ../reports/fuzz-update-report.txt
-      - name: 'Fuzz smoke: evaluator'
+      - name: "Fuzz smoke: evaluator"
         working-directory: fuzz
         continue-on-error: true
         run: |
           cargo fuzz run fuzz_eval -- -runs=2000 -timeout=5 > ../reports/fuzz-eval-report.txt
-      - name: 'Fuzz smoke: NDJSON import'
+      - name: "Fuzz smoke: NDJSON import"
         working-directory: fuzz
         continue-on-error: true
         run: |
           cargo fuzz run fuzz_ndjson_import -- -runs=2000 -timeout=5 > ../reports/fuzz-ndjson-report.txt
-      - name: 'Fuzz smoke: CSV import'
+      - name: "Fuzz smoke: CSV import"
         working-directory: fuzz
         continue-on-error: true
         run: |

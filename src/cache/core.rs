@@ -4,14 +4,13 @@ use crate::cache::policy::purge_expired;
 use crate::cache::size::approximate_doc_size;
 use crate::document::Document;
 use crate::types::DocumentId;
-use std::time::Instant;
 use lru::LruCache;
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 /// A thread-safe, in-memory cache with TTL-first + LRU fallback eviction.
 #[derive(Clone)]
@@ -72,9 +71,13 @@ impl Cache {
         {
             let mut sizes = self.sizes.write();
             if let Some(prev) = sizes.insert(document.id.clone(), approx) {
-                self.metrics.memory_bytes.fetch_sub(prev as u64, Ordering::Relaxed);
+                self.metrics
+                    .memory_bytes
+                    .fetch_sub(crate::utils::num::usize_to_u64(prev), Ordering::Relaxed);
             }
-            self.metrics.memory_bytes.fetch_add(approx as u64, Ordering::Relaxed);
+            self.metrics
+                .memory_bytes
+                .fetch_add(crate::utils::num::usize_to_u64(approx), Ordering::Relaxed);
         }
 
         let id_clone = document.id.clone();
@@ -83,7 +86,10 @@ impl Cache {
         self.metrics.inserts.fetch_add(1, Ordering::Relaxed);
         self.metrics
             .total_insert_ns
-            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            .fetch_add(
+                crate::utils::num::usize_to_u64(start.elapsed().as_nanos() as usize),
+                Ordering::Relaxed,
+            );
     }
 
     /// Retrieves a document from the cache.
@@ -97,12 +103,17 @@ impl Cache {
                 self.metrics.ttl_evictions.fetch_add(1, Ordering::Relaxed);
                 self.metrics.misses.fetch_add(1, Ordering::Relaxed);
                 if let Some(sz) = self.sizes.write().remove(id) {
-                    self.metrics.memory_bytes.fetch_sub(sz as u64, Ordering::Relaxed);
+                    self.metrics
+                        .memory_bytes
+                        .fetch_sub(crate::utils::num::usize_to_u64(sz), Ordering::Relaxed);
                 }
                 self.freq.write().remove(id);
                 self.metrics
                     .total_get_ns
-                    .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    .fetch_add(
+                        crate::utils::num::usize_to_u64(start.elapsed().as_nanos() as usize),
+                        Ordering::Relaxed,
+                    );
                 None
             } else {
                 self.metrics.hits.fetch_add(1, Ordering::Relaxed);
@@ -110,14 +121,20 @@ impl Cache {
                 *f.entry(id.clone()).or_insert(0) += 1;
                 self.metrics
                     .total_get_ns
-                    .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                    .fetch_add(
+                        crate::utils::num::usize_to_u64(start.elapsed().as_nanos() as usize),
+                        Ordering::Relaxed,
+                    );
                 Some(doc.clone())
             }
         } else {
             self.metrics.misses.fetch_add(1, Ordering::Relaxed);
             self.metrics
                 .total_get_ns
-                .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                .fetch_add(
+                    crate::utils::num::usize_to_u64(start.elapsed().as_nanos() as usize),
+                    Ordering::Relaxed,
+                );
             None
         }
     }
@@ -129,13 +146,18 @@ impl Cache {
         if removed.is_some() {
             self.metrics.removes.fetch_add(1, Ordering::Relaxed);
             if let Some(sz) = self.sizes.write().remove(id) {
-                self.metrics.memory_bytes.fetch_sub(sz as u64, Ordering::Relaxed);
+                self.metrics
+                    .memory_bytes
+                    .fetch_sub(crate::utils::num::usize_to_u64(sz), Ordering::Relaxed);
             }
             self.freq.write().remove(id);
         }
         self.metrics
             .total_remove_ns
-            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            .fetch_add(
+                crate::utils::num::usize_to_u64(start.elapsed().as_nanos() as usize),
+                Ordering::Relaxed,
+            );
         removed
     }
 

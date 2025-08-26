@@ -1,9 +1,9 @@
+mod bson;
+mod csv;
 mod detect;
+mod ndjson;
 mod options;
 mod pipeline;
-mod csv;
-mod ndjson;
-mod bson;
 mod util;
 
 pub use detect::detect_format;

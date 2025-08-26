@@ -1,6 +1,6 @@
-use nexus_lite::cli::{Command, run};
-use nexus_lite::engine::Engine;
-use nexus_lite::errors::DbError;
+use nexuslite::cli::{Command, run};
+use nexuslite::engine::Engine;
+use nexuslite::errors::DbError;
 use std::fs;
 use std::io::Write;
 use tempfile::tempdir;
@@ -58,7 +58,7 @@ async fn test_cli_telemetry_rate_limit() {
 
     // Create collection and set a very tight rate limit
     let col = engine.create_collection("users".to_string());
-    nexus_lite::telemetry::configure_rate_limit(&col.name_str(), 1, 0);
+    nexuslite::telemetry::configure_rate_limit(&col.name_str(), 1, 0);
 
     // First count ok
     let filter = "true".to_string();

@@ -1,8 +1,8 @@
 use bson::doc;
-use nexus_lite::collection::Collection;
-use nexus_lite::document::{Document, DocumentType};
-use nexus_lite::index::IndexKind;
-use nexus_lite::wasp::StorageEngine;
+use nexuslite::collection::Collection;
+use nexuslite::document::{Document, DocumentType};
+use nexuslite::index::IndexKind;
+use nexuslite::wasp::StorageEngine;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -11,7 +11,7 @@ use tempfile::tempdir;
 async fn test_collection_new() {
     let dir = tempdir().unwrap();
     let wasp_path = dir.path().join("test.wasp");
-    let wasp = nexus_lite::wasp::Wasp::new(wasp_path).unwrap();
+    let wasp = nexuslite::wasp::Wasp::new(wasp_path).unwrap();
     let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wasp)));
     let collection = Collection::new("test_collection".to_string(), storage, 10);
     assert_eq!(collection.name_str(), "test_collection");
@@ -21,7 +21,7 @@ async fn test_collection_new() {
 async fn test_insert_and_find_document() {
     let dir = tempdir().unwrap();
     let wasp_path = dir.path().join("test.wasp");
-    let wasp = nexus_lite::wasp::Wasp::new(wasp_path).unwrap();
+    let wasp = nexuslite::wasp::Wasp::new(wasp_path).unwrap();
     let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wasp)));
     let collection = Collection::new("test_collection".to_string(), storage, 10);
     let document = Document::new(doc! { "key": "value" }, DocumentType::Persistent);
@@ -37,7 +37,7 @@ async fn test_insert_and_find_document() {
 async fn test_update_document() {
     let dir = tempdir().unwrap();
     let wasp_path = dir.path().join("test.wasp");
-    let wasp = nexus_lite::wasp::Wasp::new(wasp_path).unwrap();
+    let wasp = nexuslite::wasp::Wasp::new(wasp_path).unwrap();
     let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wasp)));
     let collection = Collection::new("test_collection".to_string(), storage, 10);
     let mut document = Document::new(doc! { "key": "value" }, DocumentType::Persistent);
@@ -45,7 +45,7 @@ async fn test_update_document() {
 
     collection.insert_document(document.clone());
 
-    document.data = nexus_lite::types::SerializableBsonDocument(doc! { "key": "new_value" });
+    document.data = nexuslite::types::SerializableBsonDocument(doc! { "key": "new_value" });
     let updated = collection.update_document(&doc_id, document.clone());
     assert!(updated);
 
@@ -57,7 +57,7 @@ async fn test_update_document() {
 async fn test_delete_document() {
     let dir = tempdir().unwrap();
     let wasp_path = dir.path().join("test.wasp");
-    let wasp = nexus_lite::wasp::Wasp::new(wasp_path).unwrap();
+    let wasp = nexuslite::wasp::Wasp::new(wasp_path).unwrap();
     let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wasp)));
     let collection = Collection::new("test_collection".to_string(), storage, 10);
     let document = Document::new(doc! { "key": "value" }, DocumentType::Persistent);
@@ -75,7 +75,7 @@ async fn test_delete_document() {
 async fn test_create_index_and_query_equality() {
     let dir = tempdir().unwrap();
     let wasp_path = dir.path().join("test.wasp");
-    let wasp = nexus_lite::wasp::Wasp::new(wasp_path).unwrap();
+    let wasp = nexuslite::wasp::Wasp::new(wasp_path).unwrap();
     let storage: Arc<RwLock<Box<dyn StorageEngine>>> = Arc::new(RwLock::new(Box::new(wasp)));
     let collection = Collection::new("test_index".to_string(), storage, 10_000);
     for i in 0..100i32 {
@@ -83,14 +83,14 @@ async fn test_create_index_and_query_equality() {
         collection.insert_document(d);
     }
     collection.create_index("k", IndexKind::Hash);
-    let filter = nexus_lite::query::Filter::Cmp {
+    let filter = nexuslite::query::Filter::Cmp {
         path: "k".into(),
-        op: nexus_lite::query::CmpOp::Eq,
+        op: nexuslite::query::CmpOp::Eq,
         value: bson::Bson::Int32(42),
     };
-    let opts = nexus_lite::query::FindOptions::default();
+    let opts = nexuslite::query::FindOptions::default();
     let arc = Arc::new(collection);
-    let cur = nexus_lite::query::find_docs(&arc, &filter, &opts);
+    let cur = nexuslite::query::find_docs(&arc, &filter, &opts);
     let docs = cur.to_vec();
     assert_eq!(docs.len(), 1);
     assert_eq!(docs[0].data.0.get_i32("k").unwrap(), 42);
