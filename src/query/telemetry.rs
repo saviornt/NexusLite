@@ -191,17 +191,31 @@ pub fn metrics_text() -> String {
     // OpenMetrics/Prometheus exposition format (no types/HELP for brevity)
     let m = &TELEMETRY.metrics;
     format!(
-        "nexus_queries_total {}\n\
-         nexus_queries_slow_total {}\n\
-         nexus_writes_total {}\n\
-         nexus_audits_total {}\n\
-         nexus_rate_limited_total {}\n",
+        "queries_total {}\n\
+         queries_slow_total {}\n\
+         writes_total {}\n\
+         audits_total {}\n\
+         rate_limited_total {}\n",
         m.queries_total.load(Ordering::Relaxed),
         m.queries_slow_total.load(Ordering::Relaxed),
         m.writes_total.load(Ordering::Relaxed),
         m.audits_total.load(Ordering::Relaxed),
         m.rate_limited_total.load(Ordering::Relaxed),
     )
+}
+
+/// Return metrics as JSON with keys that do not include the `nexus_` prefix.
+/// Example keys: queries_total, queries_slow_total, writes_total, audits_total, rate_limited_total
+#[must_use]
+pub fn metrics_json() -> serde_json::Value {
+    let m = &TELEMETRY.metrics;
+    serde_json::json!({
+        "queries_total": m.queries_total.load(Ordering::Relaxed),
+        "queries_slow_total": m.queries_slow_total.load(Ordering::Relaxed),
+        "writes_total": m.writes_total.load(Ordering::Relaxed),
+        "audits_total": m.audits_total.load(Ordering::Relaxed),
+        "rate_limited_total": m.rate_limited_total.load(Ordering::Relaxed),
+    })
 }
 
 pub fn max_result_limit() -> usize {

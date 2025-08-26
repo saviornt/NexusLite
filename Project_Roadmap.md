@@ -337,22 +337,22 @@ We follow an iterative AGILE approach where each sprint adds working, testable f
 
 ## Sprint 7: Benchmarks (Optional Feature) & MVP
 
-- [ ] Create the necessary hooks within the database engine to support benchmarking. Tests should include, but not be limited to:
-  - [ ] Query execution time tracking
-  - [ ] Index usage statistics
-  - [ ] Cache hit/miss ratios
-  - [ ] WASP performance metrics
-  - [ ] Document size and growth rate tracking
-  - [ ] Query result size tracking
-  - [ ] Cache eviction statistics
-  - [ ] Document read/write latency tracking
-  - [ ] Cache performance metrics
-  - [ ] WASP recovery time tracking
-  - [ ] Any other relevant metrics
+- [x] Create the necessary hooks within the database engine to support benchmarking. Tests should include, but not be limited to:
+  - [x] Query execution time tracking (dev6 JSON logs for find/count/update/delete with duration_ms)
+  - [x] Index usage statistics (find logs include used_index flag)
+  - [x] Cache hit/miss ratios (exposed via cache metrics snapshot and persisted in benchmarks.json)
+  - [x] WASP performance metrics (recovery init time captured via dev6 JSON)
+  - [x] Document size and growth rate tracking (cache memory_bytes and mem_add/mem_free logs)
+  - [x] Query result size tracking (find logs include result_count; delete/update reports persisted)
+  - [x] Cache eviction statistics (TTL purge and LRU eviction dev6 logs with freed_bytes)
+  - [x] Document read/write latency tracking (cache total_get_ns/total_insert_ns/total_remove_ns)
+  - [x] Cache performance metrics (hits, misses, evictions, latency, memory_bytes)
+  - [x] WASP recovery time tracking (dev6 wasp recover_init duration_ms)
+  - [x] Other relevant metrics (rate_limited_total and counters via telemetry JSON)
 
-- [ ] Create benchmark tests and log their results
+- [x] Create benchmark tests and log their results
   - [x] Create benchmarks comparing WASP vs simple WAL
-  - [ ] Create benchmarks for query performance, index usage, and cache efficiency
+  - [x] Create benchmarks for query performance, index usage, and cache efficiency (tests/benchmarks.rs persists structured benchmarks.json under test_logs/ and benchmarks/results/)
 
 - [ ] Perform sanity-check of feature flags, the `cli`, `api`, `bin/nexuslite` and `feature_flags` modules.
   - [ ] Document any changes to features and feature-flags

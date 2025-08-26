@@ -44,7 +44,12 @@ impl Engine {
             metadata_path,
         };
         // Initialize ephemeral handling
+        let __bench_start = std::time::Instant::now();
         engine.init_ephemeral_cache()?;
+        crate::dev6!(
+            "{{\"bench\":\"wasp\",\"op\":\"recover_init\",\"duration_ms\":{}}}",
+            crate::utils::num::usize_to_u64(__bench_start.elapsed().as_millis() as usize)
+        );
 
         // Rebuild indexes from metadata if present
         engine.load_indexes_metadata();
@@ -132,7 +137,12 @@ impl Engine {
             metadata_path,
         };
         // Initialize ephemeral handling
+        let __bench_start = std::time::Instant::now();
         engine.init_ephemeral_cache()?;
+        crate::dev6!(
+            "{{\"bench\":\"wasp\",\"op\":\"recover_init\",\"duration_ms\":{}}}",
+            crate::utils::num::usize_to_u64(__bench_start.elapsed().as_millis() as usize)
+        );
         // Rebuild indexes from metadata if present
         engine.load_indexes_metadata();
         Ok(engine)

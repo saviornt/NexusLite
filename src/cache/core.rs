@@ -78,6 +78,11 @@ impl Cache {
             self.metrics
                 .memory_bytes
                 .fetch_add(crate::utils::num::usize_to_u64(approx), Ordering::Relaxed);
+            // Developer benchmark log: memory added for insert
+            crate::dev6!(
+                "{{\"bench\":\"cache\",\"op\":\"mem_add\",\"bytes\":{}}}",
+                crate::utils::num::usize_to_u64(approx)
+            );
         }
 
         let id_clone = document.id.clone();
@@ -146,9 +151,13 @@ impl Cache {
         if removed.is_some() {
             self.metrics.removes.fetch_add(1, Ordering::Relaxed);
             if let Some(sz) = self.sizes.write().remove(id) {
-                self.metrics
-                    .memory_bytes
-                    .fetch_sub(crate::utils::num::usize_to_u64(sz), Ordering::Relaxed);
+                let sz64 = crate::utils::num::usize_to_u64(sz);
+                self.metrics.memory_bytes.fetch_sub(sz64, Ordering::Relaxed);
+                // Developer benchmark log: memory freed by remove
+                crate::dev6!(
+                    "{{\"bench\":\"cache\",\"op\":\"mem_free\",\"bytes\":{}}}",
+                    sz64
+                );
             }
             self.freq.write().remove(id);
         }
@@ -247,6 +256,7 @@ impl Cache {
                 return;
             }
 
+            let mut freed_lru_bytes_total: u64 = 0;
             while needed > 0 && cache.len() >= cap && !cache.is_empty() {
                 let batch_size = self.config.read().batch_size.min(needed);
                 let max_samples = self.config.read().max_samples;
@@ -292,7 +302,14 @@ impl Cache {
                     if cache.pop(&key).is_some() {
                         self.metrics.lru_evictions.fetch_add(1, Ordering::Relaxed);
                         if let Some(sz) = self.sizes.write().remove(&key) {
-                            self.metrics.memory_bytes.fetch_sub(sz as u64, Ordering::Relaxed);
+                            let sz64 = crate::utils::num::usize_to_u64(sz);
+                            self.metrics.memory_bytes.fetch_sub(sz64, Ordering::Relaxed);
+                            freed_lru_bytes_total = freed_lru_bytes_total.saturating_add(sz64);
+                            // Per-eviction developer log (optional granularity)
+                            crate::dev6!(
+                                "{{\"bench\":\"cache\",\"op\":\"lru_evict\",\"freed_bytes\":{}}}",
+                                sz64
+                            );
                         }
                         self.freq.write().remove(&key);
                         evicted_this_round += 1;
@@ -305,6 +322,12 @@ impl Cache {
                 if evicted_this_round == 0 {
                     break;
                 }
+            }
+            if freed_lru_bytes_total > 0 {
+                crate::dev6!(
+                    "{{\"bench\":\"cache\",\"op\":\"lru_summary\",\"freed_bytes\":{}}}",
+                    freed_lru_bytes_total
+                );
             }
         }
     }

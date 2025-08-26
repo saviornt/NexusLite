@@ -256,4 +256,8 @@ async fn metrics_memory_and_latency_update() {
     assert!(snap_after_remove.total_remove_ns > 0);
     // Memory should not increase after removal; it should go down or stay the same if concurrent ops happened
     assert!(snap_after_remove.memory_bytes <= snap_after_get.memory_bytes);
+
+        // Invariant: hits + misses should equal number of get attempts (approximate check)
+    let total_gets = snap_after_get.hits + snap_after_get.misses;
+    assert!(total_gets >= 1);
 }

@@ -5,3 +5,4 @@ mod query_tests;
 // Telemetry lives under query in src; tests live here as well
 mod telemetry_edges_tests;
 mod telemetry_tests;
+mod benchmarks;

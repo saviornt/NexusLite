@@ -19,12 +19,13 @@ pub fn purge_expired(
         cache.iter().filter(|(_, doc)| doc.is_expired()).map(|(id, _)| id.clone()).collect();
 
     let count = expired_keys.len();
+    let mut freed_bytes: u64 = 0;
     for key in expired_keys {
         cache.pop(&key);
         if let Some(sz) = sizes.write().remove(&key) {
-            metrics
-                .memory_bytes
-                .fetch_sub(crate::utils::num::usize_to_u64(sz), Ordering::Relaxed);
+            let sz64 = crate::utils::num::usize_to_u64(sz);
+            metrics.memory_bytes.fetch_sub(sz64, Ordering::Relaxed);
+            freed_bytes = freed_bytes.saturating_add(sz64);
         }
         freq.write().remove(&key);
     }
@@ -32,6 +33,12 @@ pub fn purge_expired(
         metrics
             .ttl_evictions
             .fetch_add(crate::utils::num::usize_to_u64(count), Ordering::Relaxed);
+        // Developer benchmark log: TTL purge summary
+        crate::dev6!(
+            "{{\"bench\":\"cache\",\"op\":\"ttl_purge\",\"evicted\":{},\"freed_bytes\":{}}}",
+            count,
+            freed_bytes
+        );
     }
     count
 }

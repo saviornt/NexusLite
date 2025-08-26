@@ -17,10 +17,17 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
     let deadline =
         opts.timeout_ms.map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms));
     let needs_projection = opts.projection.is_some();
+    let bench_start = std::time::Instant::now();
+    let mut bench_used_index = false;
 
     if !needs_projection && opts.sort.is_none() {
-        let mut ids: Vec<DocumentId> =
-            plan_index_candidates(col, filter).map_or_else(|| col.list_ids(), |c| c);
+        let mut ids: Vec<DocumentId> = match plan_index_candidates(col, filter) {
+            Some(c) => {
+                bench_used_index = true;
+                c
+            }
+            None => col.list_ids(),
+        };
         ids.retain(|id| {
             if let Some(dl) = deadline
                 && std::time::Instant::now() > dl
@@ -33,6 +40,18 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
         let limit = opts.limit.unwrap_or(usize::MAX).min(MAX_LIMIT);
         let end = (skip + limit).min(ids.len());
         let ids = if skip >= ids.len() { Vec::new() } else { ids[skip..end].to_vec() };
+    let bench_result_count = ids.len();
+        let dur_ms = bench_start.elapsed().as_millis();
+        // Emit a developer-benchmark log line for deterministic capture in tests
+        crate::dev6!(
+            "{{\"bench\":\"query\",\"op\":\"find\",\"collection\":\"{}\",\"duration_ms\":{},\"used_index\":{},\"result_count\":{},\"limit\":{},\"skip\":{}}}",
+            col.name_str(),
+            crate::utils::num::usize_to_u64(dur_ms as usize),
+            bench_used_index,
+            crate::utils::num::usize_to_u64(bench_result_count),
+            crate::utils::num::usize_to_u64(opts.limit.unwrap_or(0)),
+            crate::utils::num::usize_to_u64(opts.skip.unwrap_or(0))
+        );
         return Cursor { collection: col.clone(), ids, pos: 0, docs: None };
     }
 
@@ -61,6 +80,17 @@ pub fn find_docs(col: &Arc<Collection>, filter: &Filter, opts: &FindOptions) -> 
     let limit = opts.limit.unwrap_or(usize::MAX).min(MAX_LIMIT);
     let end = (skip + limit).min(docs.len());
     let docs = if skip >= docs.len() { Vec::new() } else { docs[skip..end].to_vec() };
+    let bench_result_count = docs.len();
+    let dur_ms = bench_start.elapsed().as_millis();
+    crate::dev6!(
+        "{{\"bench\":\"query\",\"op\":\"find\",\"collection\":\"{}\",\"duration_ms\":{},\"used_index\":{},\"result_count\":{},\"limit\":{},\"skip\":{}}}",
+        col.name_str(),
+        crate::utils::num::usize_to_u64(dur_ms as usize),
+        bench_used_index,
+        crate::utils::num::usize_to_u64(bench_result_count),
+        crate::utils::num::usize_to_u64(opts.limit.unwrap_or(0)),
+        crate::utils::num::usize_to_u64(opts.skip.unwrap_or(0))
+    );
     Cursor { collection: col.clone(), ids: Vec::new(), pos: 0, docs: Some(docs) }
 }
 
@@ -90,14 +120,27 @@ pub fn count_docs_rate_limited(col: &Arc<Collection>, filter: &Filter) -> Result
             n += 1;
         }
         if start.elapsed().as_millis() > 5000 {
+            crate::dev6!(
+                "{{\"bench\":\"query\",\"op\":\"count\",\"collection\":\"{}\",\"duration_ms\":{},\"result_count\":{}}}",
+                col.name_str(),
+                crate::utils::num::usize_to_u64(start.elapsed().as_millis() as usize),
+                crate::utils::num::usize_to_u64(n)
+            );
             return Err(DbError::QueryError("timeout".into()));
         }
     }
+    crate::dev6!(
+        "{{\"bench\":\"query\",\"op\":\"count\",\"collection\":\"{}\",\"duration_ms\":{},\"result_count\":{}}}",
+        col.name_str(),
+        crate::utils::num::usize_to_u64(start.elapsed().as_millis() as usize),
+        crate::utils::num::usize_to_u64(n)
+    );
     Ok(n)
 }
 
 #[must_use]
 pub fn count_docs(col: &Arc<Collection>, filter: &Filter) -> usize {
+    let start = std::time::Instant::now();
     let ids = col.list_ids();
     let mut n = 0usize;
     for id in ids {
@@ -107,10 +150,17 @@ pub fn count_docs(col: &Arc<Collection>, filter: &Filter) -> usize {
             n += 1;
         }
     }
+    crate::dev6!(
+        "{{\"bench\":\"query\",\"op\":\"count\",\"collection\":\"{}\",\"duration_ms\":{},\"result_count\":{}}}",
+        col.name_str(),
+        crate::utils::num::usize_to_u64(start.elapsed().as_millis() as usize),
+        crate::utils::num::usize_to_u64(n)
+    );
     n
 }
 
 pub fn update_many(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) -> UpdateReport {
+    let bench_start = std::time::Instant::now();
     let mut matched = 0u64;
     let mut modified = 0u64;
     let ids: Vec<DocumentId> = col
@@ -128,6 +178,14 @@ pub fn update_many(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) -
             col.update_document(&id, doc);
         }
     }
+    let dur_ms = bench_start.elapsed().as_millis();
+    crate::dev6!(
+        "{{\"bench\":\"query\",\"op\":\"update_many\",\"collection\":\"{}\",\"duration_ms\":{},\"matched\":{},\"modified\":{}}}",
+        col.name_str(),
+        crate::utils::num::usize_to_u64(dur_ms as usize),
+        matched,
+        modified
+    );
     UpdateReport { matched, modified }
 }
 
@@ -146,6 +204,7 @@ pub fn update_one(col: &Arc<Collection>, filter: &Filter, update: &UpdateDoc) ->
 }
 
 pub fn delete_many(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
+    let bench_start = std::time::Instant::now();
     let mut deleted = 0u64;
     let ids: Vec<DocumentId> = col
         .list_ids()
@@ -157,6 +216,13 @@ pub fn delete_many(col: &Arc<Collection>, filter: &Filter) -> DeleteReport {
             deleted += 1;
         }
     }
+    let dur_ms = bench_start.elapsed().as_millis();
+    crate::dev6!(
+        "{{\"bench\":\"query\",\"op\":\"delete_many\",\"collection\":\"{}\",\"duration_ms\":{},\"deleted\":{}}}",
+        col.name_str(),
+        crate::utils::num::usize_to_u64(dur_ms as usize),
+        deleted
+    );
     DeleteReport { deleted }
 }
 

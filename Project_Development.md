@@ -155,6 +155,56 @@ NexusLite uses `log`/`log4rs`. For deterministic test logging, a developer-only 
   - let msgs = nexuslite::utils::devlog::drain();
 - These messages are also emitted under target `nexuslite::dev6` at TRACE. Configure `log4rs` to persist them if desired.
 
+### Sprint 7 benchmarking hooks (dev6 JSON lines)
+
+To support quick, deterministic benchmarking in tests and local runs, core operations emit compact JSON lines via `dev6!`:
+
+- Query execution:
+  - `find`: `{ "bench":"query", "op":"find", "collection":"<name>", "duration_ms":<u64>, "used_index":<bool>, "result_count":<u64>, "limit":<u64>, "skip":<u64> }`
+  - `count`: `{ "bench":"query", "op":"count", "collection":"<name>", "duration_ms":<u64>, "result_count":<u64> }`
+  - `update_many`: `{ "bench":"query", "op":"update_many", "collection":"<name>", "duration_ms":<u64>, "matched":<u64>, "modified":<u64> }`
+  - `delete_many`: `{ "bench":"query", "op":"delete_many", "collection":"<name>", "duration_ms":<u64>, "deleted":<u64> }`
+- WASP recovery initialization:
+  - `{ "bench":"wasp", "op":"recover_init", "duration_ms":<u64> }`
+
+- Cache instrumentation:
+  - TTL purge summary:
+    - `{ "bench":"cache", "op":"ttl_purge", "evicted":<u64>, "freed_bytes":<u64> }`
+  - LRU eviction (per victim):
+    - `{ "bench":"cache", "op":"lru_evict", "freed_bytes":<u64> }`
+  - LRU eviction summary (per cycle):
+    - `{ "bench":"cache", "op":"lru_summary", "freed_bytes":<u64> }`
+  - Memory accounting deltas:
+    - `{ "bench":"cache", "op":"mem_add", "bytes":<u64> }`
+    - `{ "bench":"cache", "op":"mem_free", "bytes":<u64> }`
+
+Capture in tests with the thread-local sink:
+
+```rust
+let _g = nexuslite::utils::devlog::enable_thread_sink();
+// ... run queries / create engine ...
+let logs = nexuslite::utils::devlog::drain();
+assert!(logs.iter().any(|l| l.contains("\"bench\":\"query\"")));
+```
+
+Optionally persist these under the `nexuslite::dev6` target by enabling it in logging config or via `configure_logging_with_dev(..., enable_dev6=true)`.
+
+Telemetry metrics JSON (prefix-free)
+
+- Besides dev6 lines, structured counters are available via `telemetry::metrics_json()` with keys that do not include the `nexus_` prefix:
+  - `queries_total`, `queries_slow_total`, `writes_total`, `audits_total`, `rate_limited_total`
+
+Persisted benchmark report
+
+- The benchmarks test aggregates dev6 lines and metrics into a single `benchmarks.json` written to two locations for convenience:
+  - `./test_logs/{timestamp}/benchmarks.json`
+  - `./benchmarks/results/{timestamp}/benchmarks.json`
+- The JSON structure includes:
+  - `when` (RFC3339 timestamp)
+  - `cache_metrics` snapshot (hits, misses, evictions, latency totals, memory_bytes)
+  - `telemetry_metrics` (from `metrics_json()`)
+  - `wasp`, `query`, and `cache` arrays with the raw dev6 JSON lines
+
 ## Development Workflow
 
 1. Create a feature branch off main.
