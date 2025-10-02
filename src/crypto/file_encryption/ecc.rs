@@ -11,6 +11,7 @@ use p256::{
 use sha2::Sha256;
 use std::fs;
 use std::io::{Read, Write};
+use zeroize::Zeroizing;
 
 const MAGIC: &[u8; 4] = b"NLEX"; // NexusLite Encrypted eXport
 
@@ -32,10 +33,10 @@ pub fn encrypt_file_p256(
     let ikm = shared.raw_secret_bytes();
     // Derive AES-256 key
     let hk = Hkdf::<Sha256>::new(None, ikm.as_slice());
-    let mut key = [0u8; 32];
-    hk.expand(b"nexuslite:file:enc", &mut key)
+    let mut key: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
+    hk.expand(b"nexuslite:file:enc", &mut *key)
         .map_err(|e| std::io::Error::other(format!("hkdf: {e}")))?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
+    let cipher = Aes256Gcm::new_from_slice(&*key)
         .map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -86,10 +87,10 @@ pub fn decrypt_file_p256(
     let shared = ecdh::diffie_hellman(sk.to_nonzero_scalar(), eph_pub.as_affine());
     let ikm = shared.raw_secret_bytes();
     let hk = Hkdf::<Sha256>::new(None, ikm.as_slice());
-    let mut key = [0u8; 32];
-    hk.expand(b"nexuslite:file:enc", &mut key)
+    let mut key: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
+    hk.expand(b"nexuslite:file:enc", &mut *key)
         .map_err(|e| std::io::Error::other(format!("hkdf: {e}")))?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
+    let cipher = Aes256Gcm::new_from_slice(&*key)
         .map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let pt = cipher

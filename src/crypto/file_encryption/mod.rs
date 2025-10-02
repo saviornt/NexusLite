@@ -17,6 +17,7 @@ use aes_gcm::{
 use p256::elliptic_curve::rand_core::{OsRng, RngCore};
 use std::fs;
 use std::io::{Read, Write};
+use zeroize::Zeroizing;
 
 // ECC (P-256) lives in ecc.rs
 
@@ -42,16 +43,17 @@ fn derive_pbe_key(
     password: &str,
     salt: &[u8],
     params: &PbeKdfParams,
-) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+) -> Result<Zeroizing<[u8; 32]>, Box<dyn std::error::Error>> {
     use argon2::{Algorithm, Argon2, Params, Version};
     // Params::new expects memory cost in KiB; pass m_cost_kib directly.
     let p = Params::new(params.m_cost_kib, params.t_cost, params.lanes, Some(32))
         .map_err(|e| std::io::Error::other(format!("argon2 params: {e}")))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, p);
-    let mut out = [0u8; 32];
+    // Hold key material in a Zeroizing buffer so it's wiped on drop.
+    let mut out: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
     let material = format!("{}:{}", username, password);
     argon
-        .hash_password_into(material.as_bytes(), salt, &mut out)
+        .hash_password_into(material.as_bytes(), salt, &mut *out)
         .map_err(|e| std::io::Error::other(format!("argon2: {e}")))?;
     Ok(out)
 }
@@ -82,7 +84,7 @@ pub fn pbe_encrypt_file(
     let key = derive_pbe_key(username, password, &salt, &params)?;
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
-    let cipher = Aes256Gcm::new_from_slice(&key)
+    let cipher = Aes256Gcm::new_from_slice(&*key)
         .map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ct = cipher
@@ -145,7 +147,7 @@ pub fn pbe_decrypt_file(
     f.read_exact(&mut nonce_bytes)?;
     let params = PbeKdfParams { t_cost, m_cost_kib: m_cost, lanes };
     let key = derive_pbe_key(username, password, &salt, &params)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
+    let cipher = Aes256Gcm::new_from_slice(&*key)
         .map_err(|e| std::io::Error::other(format!("aes key: {e}")))?;
     let mut ct = Vec::new();
     f.read_to_end(&mut ct)?;

@@ -1,4 +1,5 @@
 use p256::elliptic_curve::rand_core::{OsRng, RngCore};
+use zeroize::Zeroizing;
 
 /// Hash the specified top-level fields in a BSON document using Argon2id.
 pub fn hash_secret_fields(
@@ -13,9 +14,9 @@ pub fn hash_secret_fields(
     let argon = argon2::Argon2::default();
     for &field in fields {
         if let Some(bson::Bson::String(s)) = doc.get(field) {
-            let mut out = [0u8; 32];
+            let mut out: Zeroizing<[u8; 32]> = Zeroizing::new([0u8; 32]);
             argon
-                .hash_password_into(s.as_bytes(), &salt, &mut out)
+                .hash_password_into(s.as_bytes(), &salt, &mut *out)
                 .map_err(|e| std::io::Error::other(format!("argon2: {e}")))?;
             doc.insert(
                 field,
