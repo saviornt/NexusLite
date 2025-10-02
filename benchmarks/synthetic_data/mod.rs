@@ -1,22 +1,27 @@
 use csv::Writer;
-use fake::{Fake, faker::name::en::Name};
+use fake::{faker::name::en::Name, Fake};
 use rand::Rng;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-fn generate_csv_chunked(path: &str, total_rows: usize, chunk_size: usize) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_csv_chunked(path: &Path, total_rows: usize, chunk_size: usize) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
     let mut wtr = Writer::from_path(path)?;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Write header
     wtr.write_record(&["id", "name", "value", "flag"])?;
 
-    let mut id_counter = 0;
+    let mut id_counter = 0usize;
     while id_counter < total_rows {
         let end = std::cmp::min(id_counter + chunk_size, total_rows);
         for i in id_counter..end {
             let name: String = Name().fake();
-            let value: f64 = rng.gen_range(0.0..10000.0);
-            let flag: bool = rng.gen();
+            let value: f64 = rng.random_range(0.0..10000.0);
+            let flag: bool = rng.random();
             wtr.write_record(&[i.to_string(), name, value.to_string(), flag.to_string()])?;
         }
         wtr.flush()?; // flush each chunk to disk
@@ -27,16 +32,15 @@ fn generate_csv_chunked(path: &str, total_rows: usize, chunk_size: usize) -> Res
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let csv_path = "synthetic_data.csv";
-
-    if !Path::new(csv_path).exists() {
-        println!("File not found. Generating synthetic data in chunks...");
-        generate_csv_chunked(csv_path, 1_000_000, 100_000)?; // 1M rows, 100k per chunk, ~100mb total
-        println!("Synthetic data generated at '{}'.", csv_path);
+/// Ensure a synthetic CSV exists at the given path; generate it if missing.
+pub fn ensure_synthetic_data(csv_path: impl Into<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let csv_path = csv_path.into();
+    if !csv_path.exists() {
+        println!("File not found. Generating synthetic data in chunks at {:?}...", csv_path);
+        generate_csv_chunked(&csv_path, 1_000_000, 100_000)?; // 1M rows, 100k per chunk, ~100mb total
+        println!("Synthetic data generated at {:?}.", csv_path);
     } else {
-        println!("File '{}' already exists. Skipping generation.", csv_path);
+        println!("File {:?} already exists. Skipping generation.", csv_path);
     }
-
-    Ok(())
+    Ok(csv_path)
 }

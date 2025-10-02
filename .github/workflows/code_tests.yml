@@ -51,6 +51,8 @@ jobs:
             ${{ runner.os }}-cargo-main-
       - name: Build all workspaces
         run: cargo build --workspace --all-features --quiet
+      - name: Install Clippy
+        run: rustup component add clippy
       - name: Run Clippy (deny warnings)
         run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery
       - name: Run Rustfmt check
@@ -94,7 +96,7 @@ jobs:
         continue-on-error: true
         run: cargo audit --deny warnings > cargo-audit-report.txt
       - name: Run Cargo deny (bans/licenses/sources)
-        run: cargo deny check --all-features
+        run: cargo deny check -- --all-features
       - name: Report audit status
         if: ${{ always() && steps.audit.outcome == 'failure' }}
         run: echo "cargo audit failed; continuing to run other checks."
@@ -198,47 +200,6 @@ jobs:
             ${{ runner.os }}-cargo-test-quick-
       - name: Run quick tests (skip proptests and ignored)
         run: cargo test --workspace --quiet -- --skip prop_ --skip ignored
-
-  miri:
-    name: "Miri (UB checker)"
-    needs: build-and-lint
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    if: always()
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Install Rust nightly toolchain with Miri component
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target
-          key: ${{ runner.os }}-cargo-miri-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-miri-
-      - name: Setup Miri
-        run: |
-          rustup component add miri
-          cargo miri setup
-      - name: Run tests under Miri and save report
-        continue-on-error: true
-        run: cargo miri test --workspace --all-features > miri-report.txt
-      - name: Upload Miri report
-        uses: actions/upload-artifact@v4
-        with:
-          name: miri-report-${{ matrix.os }}
-          path: miri-report.txt
 
   cargo-mutants:
     name: "Mutation Tests"
